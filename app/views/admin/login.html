@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Login</title>
+    <style>
+      :root{
+        --bg: #f5f6fb;
+        --card: #ffffff;
+        --border:#e9edf5;
+        --text:#1f2937;
+        --muted:#7c8aa0;
+        --primary:#6c5ce7;
+        --primary-strong:#5a4bd6;
+      }
+      html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--text); }
+      .container { min-height: 100%; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; }
+      .card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 28px; box-shadow: 0 24px 60px rgba(92,81,199,0.15); }
+      h1 { margin: 0 0 16px; font-size: 22px; color: var(--text); text-align: center; }
+      .field { margin-bottom: 14px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      input[type="email"], input[type="password"] {
+        width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; background:#fff; box-sizing: border-box;
+      }
+      input[type="email"]:focus, input[type="password"]:focus { border-color: #c4b5fd; box-shadow: 0 0 0 3px rgba(108,92,231,0.20); }
+      .actions { margin-top: 16px; }
+      button {
+        width: 100%; height: 42px; border: 1px solid var(--primary); border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px;
+        background: var(--primary); color: #ffffff; transition: background 0.2s ease, transform .02s ease; box-shadow: 0 6px 14px rgba(108,92,231,0.25); box-sizing: border-box;
+      }
+      button:hover { background: var(--primary-strong); }
+      .hint { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Admin Login</h1>
+        <form method="post" action="/admin/login">
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="username" required>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="actions">
+            <button type="submit">Login</button>
+          </div>
+          <div class="hint">Your session uses HttpOnly cookies.</div>
+        </form>
+      </div>
+    </div>
+  </body>
+  </html>
+
+

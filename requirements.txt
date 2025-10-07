@@ -1,0 +1,16 @@
+fastapi>=0.104.0
+uvicorn>=0.24.0
+motor>=3.3.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+loguru
+pydantic[email]>=2.0.0
+cryptography>=43.0.0
+requests>=2.31.0
+# JWT + cryptography
+python-jose[cryptography]==3.3.0
+# Password hashing
+bcrypt==4.1.2
+Jinja2>=3.1,<4
+python-multipart>=0.0.9,<1
+boto3>=1.35.1

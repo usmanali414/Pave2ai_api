@@ -1,0 +1,330 @@
+{% extends "admin/base.html" %}
+{% block title %}Customer Management{% endblock %}
+{% block head %}
+<style>
+  .page-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .page-title { font-size:18px; font-weight:600; color:#1f2937; }
+  .controls { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .chip { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:16px; background:#fff; color:#374151; cursor:pointer; font-size:12px; }
+  .chip[aria-selected="true"] { background: #ede9fe; color:#5b21b6; border-color:#c4b5fd; }
+  .search { position:relative; }
+  .search input { height:34px; width:260px; padding:0 12px; border:1px solid var(--border); border-radius:10px; }
+  .table-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; }
+  table.modern { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
+  table.modern thead th { background:#f8f9ff; font-weight:600; font-size:12px; color:#6b7280; text-transform:none; padding:12px 16px; border-bottom:1px solid var(--border); text-align:left; }
+  table.modern tbody td { padding:12px 16px; font-size:14px; border-bottom:1px solid var(--border); vertical-align:middle; text-align:left; }
+  table.modern thead th:first-child, table.modern tbody td:first-child { padding-left:20px; }
+  table.modern thead th:last-child, table.modern tbody td:last-child { padding-right:20px; width:180px; }
+  table.modern tbody tr:last-child td { border-bottom:0; }
+  .badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:600; }
+  .badge.success { background:#dcfce7; color:#166534; }
+  .badge.neutral { background:#e5e7eb; color:#374151; }
+  .btn.ghost { background:#fff; border-color:var(--border); }
+  .btn.edit { color:#3b82f6; border-color:#bfdbfe; }
+  .btn.edit:hover { background:#eff6ff; border-color:#3b82f6; }
+  .btn.delete { color:#dc2626; border-color:#fecaca; }
+  .btn.delete:hover { background:#fef2f2; border-color:#dc2626; }
+  .section { margin-top:12px; }
+  .col-tenant{ width:280px; }
+  .tenant-cell{ display:flex; flex-direction:column; gap:2px; }
+  .tenant-cell .tenant-name{ font-weight:500; max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tenant-cell small{ font-size:11px; color:var(--muted); }
+  .btn.ghost { margin-right:6px; }
+  .btn.ghost:last-child { margin-right:0; }
+  .field input:disabled { background:#f3f4f6; color:#9ca3af; cursor:not-allowed; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-toolbar">
+    <div class="page-title">
+      <span id="title-tenants">Tenants</span>
+      <span id="title-users" style="display:none;">Users</span>
+    </div>
+    <div class="controls">
+      <div class="search"><input id="search-box" type="text" placeholder="Search by name or email" /></div>
+      <div id="filters" class="controls">
+        <button class="chip" data-filter="all" aria-selected="true">All</button>
+        <button class="chip" data-filter="active">Active</button>
+        <button class="chip" data-filter="inactive">Inactive</button>
+      </div>
+      <button id="btn-create" class="btn primary">New</button>
+        </div>
+      </div>
+
+  <div id="tenants-pane" style="display:none;" class="section">
+    <div class="table-wrap" style="overflow:auto;">
+      <table id="tenants-table" class="modern">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Company</th>
+            <th>Website</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tenants %}
+          <tr data-id="{{ t.id }}" data-status="{{ (t.status or 'active')|lower }}">
+            <td>{{ t.name or '-' }}</td>
+            <td>{{ t.email }}</td>
+            <td>{{ t.company_name or '-' }}</td>
+            <td>{{ t.website or '-' }}</td>
+            <td>{{ t.phone or '-' }}</td>
+            <td>
+              {% set s = (t.status or 'active')|lower %}
+              <span class="badge {{ 'success' if s=='active' else 'neutral' }}">{{ t.status }}</span>
+            </td>
+            <td>
+              <button class="btn ghost edit" data-action="edit-tenant">Edit</button>
+              <button class="btn ghost delete" data-action="delete-tenant">Delete</button>
+            </td>
+          </tr>
+      {% endfor %}
+        </tbody>
+      </table>
+  </div>
+</div>
+
+  <div id="users-pane" style="display:none;" class="section">
+    <div class="table-wrap" style="overflow:auto;">
+      <table id="users-table" class="modern">
+        <thead>
+          <tr>
+            <th class="col-tenant">Tenant</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+      {% for u in users %}
+          <tr data-id="{{ u.id }}" data-tenant-id="{{ u.tenant_id }}" data-status="{{ (u.status or 'active')|lower }}">
+            <td class="tenant-cell">
+              <span class="tenant-name" data-tenant-id="{{ u.tenant_id }}">{{ u.tenant_id }}</span>
+              <small>{{ u.tenant_id }}</small>
+            </td>
+            <td>{{ u.name or '-' }}</td>
+            <td>{{ u.email }}</td>
+            <td>{{ u.role }}</td>
+            <td>
+              {% set s2 = (u.status or 'active')|lower %}
+              <span class="badge {{ 'success' if s2=='active' else 'neutral' }}">{{ u.status }}</span>
+            </td>
+            <td>
+              <button class="btn ghost edit" data-action="edit-user">Edit</button>
+              <button class="btn ghost delete" data-action="delete-user">Delete</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+        </div>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+
+<script>
+(function(){
+  var active = '{{ subtab|default("tenants") }}';
+  var tenantsPane = document.getElementById('tenants-pane');
+  var usersPane = document.getElementById('users-pane');
+  var createBtn = document.getElementById('btn-create');
+  var modalRoot = document.getElementById('modal-root');
+  var titleTenants = document.getElementById('title-tenants');
+  var titleUsers = document.getElementById('title-users');
+  var searchBox = document.getElementById('search-box');
+  var filters = document.getElementById('filters');
+
+  // Set initial visible pane based on sidebar sub parameter
+  function applyActive(){
+    tenantsPane.style.display = (active==='tenants') ? '' : 'none';
+    usersPane.style.display = (active==='users') ? '' : 'none';
+    titleTenants.style.display = (active==='tenants') ? '' : 'none';
+    titleUsers.style.display = (active==='users') ? '' : 'none';
+    applyFilters();
+  }
+
+  function inputField(label, name, type, value, disabled){
+    var disabledAttr = disabled ? ' disabled' : '';
+    return '\n<div class="field">\n<label>'+label+'</label>\n<input name="'+name+'" type="'+(type||'text')+'" value="'+(value||'')+'"'+disabledAttr+' />\n</div>';
+  }
+
+  function selectField(label, name, options, value){
+    var opts = options.map(function(o){ var v = (typeof o === 'string')?o:o.value; var t = (typeof o === 'string')?o:o.label; return '<option value="'+v+'"'+(v==value?' selected':'')+'>'+t+'</option>'; }).join('');
+    return '\n<div class="field">\n<label>'+label+'</label>\n<select name="'+name+'">'+opts+'</select>\n</div>';
+  }
+
+  function openFormModal(kind, data){
+    var isEdit = !!(data && data.id);
+    var title = (isEdit? 'Edit ' : 'Create ') + (kind==='tenant' ? 'Tenant' : 'User');
+    var body = '';
+    if (kind === 'tenant'){
+      body += inputField('Name','name','text', data && data.name);
+      body += inputField('Email','email','email', data && data.email);
+      if (!isEdit) { body += inputField('Password','password','password',''); } else { body += '<input type="hidden" name="password" value="" />'; }
+      body += inputField('Company','company_name','text', data && data.company_name);
+      body += inputField('Website','website','text', data && data.website);
+      body += inputField('Phone','phone','text', data && data.phone);
+      body += selectField('Status','status',['active','inactive'], data && data.status);
+    } else {
+      body += selectField('Tenant','tenant_id', getTenantOptions(), data && data.tenant_id);
+      body += inputField('Name','name','text', data && data.name);
+      body += inputField('Email','email','email', data && data.email);
+      if (!isEdit) { body += inputField('Password','password','password',''); } else { body += '<input type="hidden" name="password" value="" />'; }
+      body += inputField('Role','role','text', data && data.role, isEdit);
+      body += selectField('Status','status',['active','inactive'], data && data.status);
+    }
+    var idAttr = data && data.id ? ' data-id="'+data.id+'"' : '';
+    var html = '\n<div class="backdrop show" id="modal">\n  <div class="modal">\n    <header>'+title+'</header>\n    <div class="body">\n      <form id="modal-form"'+idAttr+'>\n        '+body+'\n      </form>\n    </div>\n    <div class="footer">\n      <button class="btn" onclick="closeModal(\'modal\')">Cancel</button>\n      <button id="modal-submit" class="btn primary">'+(isEdit?'Update':'Create')+'</button>\n    </div>\n  </div>\n</div>';
+    modalRoot.innerHTML = html;
+    document.getElementById('modal-submit').addEventListener('click', function(e){ e.preventDefault(); submitForm(kind, isEdit); });
+  }
+
+  function confirmDelete(kind, id){
+    var html = '\n<div class="backdrop show" id="modal">\n  <div class="modal">\n    <header>Delete '+(kind==='tenant'?'Tenant':'User')+'</header>\n    <div class="body">Are you sure you want to delete this '+kind+'?</div>\n    <div class="footer">\n      <button class="btn" onclick="closeModal(\'modal\')">Cancel</button>\n      <button id="modal-del" class="btn primary">Delete</button>\n    </div>\n  </div>\n</div>';
+    modalRoot.innerHTML = html;
+    document.getElementById('modal-del').addEventListener('click', function(){ doDelete(kind, id); });
+  }
+
+  function readForm(form){
+    var data = {};
+    Array.prototype.forEach.call(form.elements, function(el){ if (!el.name) return; var v = (el.value || '').trim(); data[el.name] = v; });
+    return data;
+  }
+
+  function submitForm(kind, isEdit){
+    var form = document.getElementById('modal-form');
+    var payload = readForm(form);
+    var id = form.getAttribute('data-id');
+    var method = isEdit ? 'PUT' : 'POST';
+    // Client-side required checks to avoid 422
+    if (kind === 'tenant' && method === 'POST'){
+      if (!payload.email || !payload.password){ showToast('Email and password are required', 'error'); return; }
+    }
+    if (kind === 'user' && method === 'POST'){
+      if (!payload.tenant_id || !payload.email || !payload.password || !payload.role){ showToast('Tenant, email, password and role are required', 'error'); return; }
+    }
+    if (!payload.status) payload.status = 'active';
+    if (method === 'POST') { Object.keys(payload).forEach(function(k){ if (payload[k] === '') delete payload[k]; }); }
+    var url = kind==='tenant' ? '/tenant' + (isEdit? ('/'+id):'') : '/user' + (isEdit? ('/'+id):'');
+    payload.metadata = {};
+    console.log(payload);
+    fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || (j.message || 'Request failed')); }).catch(function(){ throw new Error('Request failed'); }); return r.json(); })
+      .then(function(){ closeModal('modal'); showToast('Saved', 'success'); reload(); })
+      .catch(function(e){ showToast(e.message || 'Failed', 'error'); });
+  }
+
+  // Filtering and search
+  function applyFilters(){
+    var q = (searchBox.value || '').toLowerCase();
+    var selected = (filters.querySelector('.chip[aria-selected="true"]') || {}).getAttribute && filters.querySelector('.chip[aria-selected="true"]').getAttribute('data-filter') || 'all';
+    var table = active==='tenants' ? document.getElementById('tenants-table') : document.getElementById('users-table');
+    if (!table) return;
+    var rows = table.querySelectorAll('tbody tr');
+    Array.prototype.forEach.call(rows, function(tr){
+      var status = (tr.getAttribute('data-status') || '').toLowerCase();
+      var text = (tr.textContent || '').toLowerCase();
+      var matchStatus = (selected==='all') || (status===selected);
+      var matchQuery = !q || text.indexOf(q) !== -1;
+      tr.style.display = (matchStatus && matchQuery) ? '' : 'none';
+    });
+  }
+  if (filters){
+    filters.addEventListener('click', function(e){
+      var b = e.target.closest('.chip'); if (!b) return;
+      Array.prototype.forEach.call(filters.querySelectorAll('.chip'), function(c){ c.setAttribute('aria-selected','false'); });
+      b.setAttribute('aria-selected','true');
+      applyFilters();
+    });
+  }
+  if (searchBox){ searchBox.addEventListener('input', applyFilters); }
+
+  function doDelete(kind, id){
+    var url = kind==='tenant' ? '/tenant/'+id : '/user/'+id;
+    fetch(url, { method: 'DELETE' })
+      .then(function(r){ if(!r.ok) throw new Error('Delete failed'); return r.json().catch(function(){return {};}); })
+      .then(function(){ closeModal('modal'); showToast('Deleted', 'success'); reload(); })
+      .catch(function(){ showToast('Failed', 'error'); });
+  }
+
+  function onClickTable(e){
+    var btn = e.target.closest('button');
+    if (!btn) return;
+    var tr = btn.closest('tr');
+    var id = tr && tr.getAttribute('data-id');
+    if (!id) return;
+    if (btn.getAttribute('data-action') === 'edit-tenant'){
+      fetch('/admin/customers/tenant/'+id).then(function(r){return r.json();}).then(function(data){ openFormModal('tenant', data); });
+    }
+    if (btn.getAttribute('data-action') === 'delete-tenant'){
+      confirmDelete('tenant', id);
+    }
+    if (btn.getAttribute('data-action') === 'edit-user'){
+      fetch('/admin/customers/user/'+id).then(function(r){return r.json();}).then(function(data){ openFormModal('user', data); });
+    }
+    if (btn.getAttribute('data-action') === 'delete-user'){
+      confirmDelete('user', id);
+    }
+  }
+
+  function reload(){
+    // Simple approach: reload current page to refresh lists
+    location.reload();
+  }
+
+  var tt = document.getElementById('tenants-table'); if (tt) tt.addEventListener('click', onClickTable);
+  var ut = document.getElementById('users-table'); if (ut) ut.addEventListener('click', onClickTable);
+  createBtn.addEventListener('click', function(){ openFormModal(active === 'tenants' ? 'tenant' : 'user'); });
+
+  // Build tenant id->name map (prefetch via API; fallback to table)
+  var TENANT_MAP = {};
+  var TENANT_OPTIONS = [];
+  try {
+    var rows = document.querySelectorAll('#tenants-table tbody tr');
+    Array.prototype.forEach.call(rows, function(tr){
+      var id = tr.getAttribute('data-id');
+      var cells = tr.querySelectorAll('td');
+      var name = cells[0] ? (cells[0].textContent || '').trim() : '';
+      var email = cells[1] ? (cells[1].textContent || '').trim() : '';
+      var label = (name && name !== '-') ? name : (email || id);
+      if (id) TENANT_MAP[id] = label;
+    });
+  } catch(e) {}
+  function rebuildTenantOptions(){
+    TENANT_OPTIONS = Object.keys(TENANT_MAP).map(function(id){ return { value: id, label: TENANT_MAP[id] }; });
+  }
+  function updateTenantNames(){
+    // Update all tenant name displays in the Users table
+    Array.prototype.forEach.call(document.querySelectorAll('.tenant-name'), function(el){
+      var id = el.getAttribute('data-tenant-id');
+      if (id && TENANT_MAP[id]){ el.textContent = TENANT_MAP[id]; }
+      else if (id){ el.textContent = id; }
+    });
+  }
+  function getTenantOptions(){ return TENANT_OPTIONS; }
+  function fetchTenants(){
+    return fetch('/tenant').then(function(r){ return r.json(); }).then(function(list){
+      if (Array.isArray(list)){
+        list.forEach(function(t){ var id = (t._id || t.id); var label = t.name || t.email || id; if (id) TENANT_MAP[id] = label; });
+        rebuildTenantOptions();
+        updateTenantNames();
+      }
+    }).catch(function(){});
+  }
+  rebuildTenantOptions();
+  updateTenantNames();
+  fetchTenants();
+
+  // initial
+  applyActive();
+})();
+</script>
+{% endblock %}

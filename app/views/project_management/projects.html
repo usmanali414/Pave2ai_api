@@ -1,0 +1,251 @@
+{% extends "admin/base.html" %}
+{% block title %}Project Management{% endblock %}
+{% block head %}
+<style>
+  .page-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .page-title { font-size:18px; font-weight:600; color:#1f2937; }
+  .controls { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .chip { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:16px; background:#fff; color:#374151; cursor:pointer; font-size:12px; }
+  .chip[aria-selected="true"] { background: #ede9fe; color:#5b21b6; border-color:#c4b5fd; }
+  .search { position:relative; }
+  .search input { height:34px; width:260px; padding:0 12px; border:1px solid var(--border); border-radius:10px; }
+  .table-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; }
+  table.modern { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
+  table.modern thead th { background:#f8f9ff; font-weight:600; font-size:12px; color:#6b7280; text-transform:none; padding:12px 16px; border-bottom:1px solid var(--border); text-align:left; }
+  table.modern tbody td { padding:12px 16px; font-size:14px; border-bottom:1px solid var(--border); vertical-align:middle; text-align:left; }
+  table.modern thead th:first-child, table.modern tbody td:first-child { padding-left:20px; }
+  table.modern thead th:last-child, table.modern tbody td:last-child { padding-right:20px; width:180px; }
+  table.modern tbody tr:last-child td { border-bottom:0; }
+  .badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:600; }
+  .badge.success { background:#dcfce7; color:#166534; }
+  .badge.neutral { background:#e5e7eb; color:#374151; }
+  .btn.ghost { background:#fff; border-color:var(--border); }
+  .btn.edit { color:#3b82f6; border-color:#bfdbfe; }
+  .btn.edit:hover { background:#eff6ff; border-color:#3b82f6; }
+  .btn.delete { color:#dc2626; border-color:#fecaca; }
+  .btn.delete:hover { background:#fef2f2; border-color:#dc2626; }
+  .section { margin-top:12px; }
+  .btn.ghost { margin-right:6px; }
+  .btn.ghost:last-child { margin-right:0; }
+  .field input:disabled, .field select:disabled { background:#f3f4f6; color:#9ca3af; cursor:not-allowed; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-toolbar">
+    <div class="page-title">Projects</div>
+    <div class="controls">
+      <div class="search"><input id="search-box" type="text" placeholder="Search by name" /></div>
+      <div id="filters" class="controls">
+        <button class="chip" data-filter="all" aria-selected="true">All</button>
+        <button class="chip" data-filter="active">Active</button>
+        <button class="chip" data-filter="inactive">Inactive</button>
+      </div>
+      <button id="btn-create" class="btn primary">New</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="table-wrap" style="overflow:auto;">
+      <table id="projects-table" class="modern">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Tenant</th>
+            <th>Owner</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in projects %}
+          <tr data-id="{{ p.id }}" data-tenant-id="{{ p.tenant_id }}" data-user-id="{{ p.user_id }}" data-status="{{ (p.status or 'active')|lower }}">
+            <td>{{ p.name }}</td>
+            <td><span class="tenant-name" data-tenant-id="{{ p.tenant_id }}">{{ p.tenant_id }}</span></td>
+            <td><span class="user-name" data-user-id="{{ p.user_id }}">{{ p.user_id }}</span></td>
+            <td>
+              {% set s = (p.status or 'active')|lower %}
+              <span class="badge {{ 'success' if s=='active' else 'neutral' }}">{{ p.status }}</span>
+            </td>
+            <td>
+              <button class="btn ghost edit" data-action="edit-project">Edit</button>
+              <button class="btn ghost delete" data-action="delete-project">Delete</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+          </div>
+    </div>
+  </div>
+
+<div id="modal-root"></div>
+
+  <script>
+(function(){
+  var createBtn = document.getElementById('btn-create');
+  var modalRoot = document.getElementById('modal-root');
+  var searchBox = document.getElementById('search-box');
+  var filters = document.getElementById('filters');
+
+  function inputField(label, name, type, value, disabled){
+    var disabledAttr = disabled ? ' disabled' : '';
+    return '\n<div class="field">\n<label>'+label+'</label>\n<input name="'+name+'" type="'+(type||'text')+'" value="'+(value||'')+'"'+disabledAttr+' />\n</div>';
+  }
+
+  function selectField(label, name, options, value, disabled){
+    var placeholder = '';
+    if (!value) {
+      var placeholderText = 'Select ' + label.toLowerCase();
+      placeholder = '<option value="" disabled selected>'+placeholderText+'</option>';
+    }
+    var opts = options.map(function(o){ var v = (typeof o === 'string')?o:o.value; var t = (typeof o === 'string')?o:o.label; return '<option value="'+v+'"'+(v==value?' selected':'')+'>'+t+'</option>'; }).join('');
+    var disabledAttr = disabled ? ' disabled' : '';
+    return '\n<div class="field">\n<label>'+label+'</label>\n<select name="'+name+'"'+disabledAttr+'>'+placeholder+opts+'</select>\n</div>';
+  }
+
+  function openFormModal(data){
+    var isEdit = !!(data && data.id);
+    var title = (isEdit? 'Edit ' : 'Create ') + 'Project';
+    var body = '';
+    body += inputField('Name','name','text', data && data.name);
+    body += selectField('Tenant','tenant_id', getTenantOptions(), data && data.tenant_id, isEdit);
+    body += selectField('User (Owner)','user_id', getUserOptions(), data && data.user_id, isEdit);
+    body += selectField('Status','status',['active','inactive'], data && data.status);
+    var idAttr = data && data.id ? ' data-id="'+data.id+'"' : '';
+    var html = '\n<div class="backdrop show" id="modal">\n  <div class="modal">\n    <header>'+title+'</header>\n    <div class="body">\n      <form id="modal-form"'+idAttr+'>\n        '+body+'\n      </form>\n    </div>\n    <div class="footer">\n      <button class="btn" onclick="closeModal(\'modal\')">Cancel</button>\n      <button id="modal-submit" class="btn primary">'+(isEdit?'Update':'Create')+'</button>\n    </div>\n  </div>\n</div>';
+    modalRoot.innerHTML = html;
+    document.getElementById('modal-submit').addEventListener('click', function(e){ e.preventDefault(); submitForm(isEdit); });
+  }
+
+  function confirmDelete(id){
+    var html = '\n<div class="backdrop show" id="modal">\n  <div class="modal">\n    <header>Delete Project</header>\n    <div class="body">Are you sure you want to delete this project?</div>\n    <div class="footer">\n      <button class="btn" onclick="closeModal(\'modal\')">Cancel</button>\n      <button id="modal-del" class="btn primary">Delete</button>\n    </div>\n  </div>\n</div>';
+    modalRoot.innerHTML = html;
+    document.getElementById('modal-del').addEventListener('click', function(){ doDelete(id); });
+  }
+
+  function readForm(form){
+    var data = {};
+    Array.prototype.forEach.call(form.elements, function(el){ if (!el.name) return; var v = (el.value || '').trim(); data[el.name] = v; });
+    return data;
+  }
+
+  function submitForm(isEdit){
+    var form = document.getElementById('modal-form');
+    var payload = readForm(form);
+    var id = form.getAttribute('data-id');
+    var method = isEdit ? 'PUT' : 'POST';
+    if (!payload.name || !payload.tenant_id || !payload.user_id){ showToast('Name, tenant and user are required', 'error'); return; }
+    if (!payload.status) payload.status = 'active';
+    payload.metadata = {};
+    var url = '/project' + (isEdit? ('/'+id):'');
+    fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || (j.message || 'Request failed')); }).catch(function(){ throw new Error('Request failed'); }); return r.json(); })
+      .then(function(){ closeModal('modal'); showToast('Saved', 'success'); reload(); })
+      .catch(function(e){ showToast(e.message || 'Failed', 'error'); });
+  }
+
+  function doDelete(id){
+    var url = '/project/'+id;
+    fetch(url, { method: 'DELETE' })
+      .then(function(r){ if(!r.ok) throw new Error('Delete failed'); return r.json().catch(function(){return {};}); })
+      .then(function(){ closeModal('modal'); showToast('Deleted', 'success'); reload(); })
+      .catch(function(){ showToast('Failed', 'error'); });
+  }
+
+  function onClickTable(e){
+    var btn = e.target.closest('button');
+    if (!btn) return;
+    var tr = btn.closest('tr');
+    var id = tr && tr.getAttribute('data-id');
+    if (!id) return;
+    if (btn.getAttribute('data-action') === 'edit-project'){
+      fetch('/admin/projects/' + id).then(function(r){return r.json();}).then(function(data){ openFormModal(data); });
+    }
+    if (btn.getAttribute('data-action') === 'delete-project'){
+      confirmDelete(id);
+    }
+  }
+
+  function reload(){
+    location.reload();
+  }
+
+  function applyFilters(){
+    var q = (searchBox.value || '').toLowerCase();
+    var selected = (filters.querySelector('.chip[aria-selected="true"]') || {}).getAttribute && filters.querySelector('.chip[aria-selected="true"]').getAttribute('data-filter') || 'all';
+    var table = document.getElementById('projects-table');
+    if (!table) return;
+    var rows = table.querySelectorAll('tbody tr');
+    Array.prototype.forEach.call(rows, function(tr){
+      var status = (tr.getAttribute('data-status') || '').toLowerCase();
+      var text = (tr.textContent || '').toLowerCase();
+      var matchStatus = (selected==='all') || (status===selected);
+      var matchQuery = !q || text.indexOf(q) !== -1;
+      tr.style.display = (matchStatus && matchQuery) ? '' : 'none';
+    });
+  }
+
+  if (filters){
+    filters.addEventListener('click', function(e){
+      var b = e.target.closest('.chip'); if (!b) return;
+      Array.prototype.forEach.call(filters.querySelectorAll('.chip'), function(c){ c.setAttribute('aria-selected','false'); });
+      b.setAttribute('aria-selected','true');
+      applyFilters();
+    });
+  }
+  if (searchBox){ searchBox.addEventListener('input', applyFilters); }
+
+  var tt = document.getElementById('projects-table'); if (tt) tt.addEventListener('click', onClickTable);
+  createBtn.addEventListener('click', function(){ openFormModal(); });
+
+  // Build tenant and user maps
+  var TENANT_MAP = {};
+  var TENANT_OPTIONS = [];
+  var USER_MAP = {};
+  var USER_OPTIONS = [];
+
+  function rebuildTenantOptions(){ TENANT_OPTIONS = Object.keys(TENANT_MAP).map(function(id){ return { value: id, label: TENANT_MAP[id] }; }); }
+  function getTenantOptions(){ return TENANT_OPTIONS; }
+  function rebuildUserOptions(){ USER_OPTIONS = Object.keys(USER_MAP).map(function(id){ return { value: id, label: USER_MAP[id] }; }); }
+  function getUserOptions(){ return USER_OPTIONS; }
+
+  function updateNames(){
+    Array.prototype.forEach.call(document.querySelectorAll('.tenant-name'), function(el){
+      var id = el.getAttribute('data-tenant-id');
+      if (id && TENANT_MAP[id]){ el.textContent = TENANT_MAP[id]; }
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.user-name'), function(el){
+      var id = el.getAttribute('data-user-id');
+      if (id && USER_MAP[id]){ el.textContent = USER_MAP[id]; }
+    });
+  }
+
+  function fetchTenants(){
+    return fetch('/tenant').then(function(r){ return r.json(); }).then(function(list){
+      if (Array.isArray(list)){
+        list.forEach(function(t){ var id = (t._id || t.id); var label = t.name || t.email || id; if (id) TENANT_MAP[id] = label; });
+        rebuildTenantOptions();
+        updateNames();
+      }
+    }).catch(function(){});
+  }
+
+  function fetchUsers(){
+    return fetch('/user').then(function(r){ return r.json(); }).then(function(list){
+      if (Array.isArray(list)){
+        list.forEach(function(u){ var id = (u._id || u.id); var label = u.name || u.email || id; if (id) USER_MAP[id] = label; });
+        rebuildUserOptions();
+        updateNames();
+      }
+    }).catch(function(){});
+  }
+
+  rebuildTenantOptions();
+  rebuildUserOptions();
+  updateNames();
+  fetchTenants();
+  fetchUsers();
+})();
+  </script>
+{% endblock %}

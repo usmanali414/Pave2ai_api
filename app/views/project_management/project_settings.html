@@ -1,0 +1,585 @@
+{% extends "admin/base.html" %}
+{% block title %}Project Settings{% endblock %}
+{% block head %}
+<style>
+  .settings-container { max-width: 900px; margin: 0 auto; }
+  .page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin-bottom: 24px; }
+  
+  /* Progress Steps */
+  .progress-steps { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; position: relative; }
+  .progress-steps::before { content: ''; position: absolute; top: 20px; left: 40px; right: 40px; height: 2px; background: #e9edf5; z-index: 0; }
+  .step { display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 1; position: relative; flex: 1; }
+  .step-circle { width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 2px solid #e9edf5; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #9ca3af; transition: all 0.3s; }
+  .step.active .step-circle { border-color: var(--primary); background: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(108, 92, 231, 0.3); }
+  .step.completed .step-circle { border-color: #10b981; background: #10b981; color: #fff; }
+  .step-label { font-size: 13px; color: #6b7280; font-weight: 500; text-align: center; }
+  .step.active .step-label { color: var(--primary); font-weight: 600; }
+  .step.completed .step-label { color: #10b981; }
+  .step.disabled .step-circle { background: #f3f4f6; border-color: #e5e7eb; }
+  .step.disabled .step-label { color: #d1d5db; }
+  
+  /* Step Content */
+  .step-content { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; min-height: 350px; }
+  .step-content.hidden { display: none; }
+  .step-header { font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+  .step-description { font-size: 14px; color: #6b7280; margin-bottom: 20px; }
+  
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 13px; color: #6b7280; margin-bottom: 6px; font-weight: 500; }
+  .field select, .field input { width: 100%; height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; box-sizing: border-box; background: #fff; font-size: 14px; }
+  .field select:focus, .field input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.1); }
+  .field textarea { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; box-sizing: border-box; background: #fff; font-size: 14px; font-family: inherit; resize: vertical; }
+  .field textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.1); }
+  #classes-container { max-height: 400px; overflow-y: auto; margin-bottom: 16px; }
+  
+  .url-display { background: #f8f9ff; border: 1px solid #e9edf5; border-radius: 10px; padding: 14px 16px; font-family: 'Courier New', monospace; font-size: 13px; color: #5b21b6; margin-top: 12px; word-break: break-all; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .url-text { flex: 1; }
+  .copy-btn { padding: 6px 12px; background: var(--primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .copy-btn:hover { background: var(--primary-strong); }
+  /* Spinner */
+  .spinner { width: 30px; height: 30px; border: 2px solid #e5e7eb; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+  .hidden { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  
+  .step-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .btn-group { display: flex; gap: 10px; }
+  
+  .info-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 12px 14px; margin-top: 16px; display: flex; align-items: start; gap: 10px; }
+  .info-box svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+  .info-box-text { font-size: 13px; color: #1e40af; line-height: 1.5; }
+  
+  .disabled-overlay { position: relative; pointer-events: none; opacity: 0.5; }
+  .disabled-overlay::after { content: '🔒 Coming Soon'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.95); padding: 12px 24px; border-radius: 8px; font-weight: 600; color: #6b7280; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="settings-container">
+  <div class="page-title">Project Settings</div>
+  
+  <!-- Progress Steps -->
+  <div class="progress-steps">
+    <div class="step active" id="step-indicator-1">
+      <div class="step-circle">1</div>
+      <div class="step-label">Data Upload</div>
+    </div>
+    <div class="step disabled" id="step-indicator-2">
+      <div class="step-circle">2</div>
+      <div class="step-label">Labelling</div>
+    </div>
+    <div class="step disabled" id="step-indicator-3">
+      <div class="step-circle">3</div>
+      <div class="step-label">Training</div>
+    </div>
+    <div class="step disabled" id="step-indicator-4">
+      <div class="step-circle">4</div>
+      <div class="step-label">Inference</div>
+    </div>
+  </div>
+  
+  <!-- Step 1: Data Upload -->
+  <div class="step-content" id="step-1">
+    <div class="step-header">Upload Raw Data</div>
+    <div class="step-description">Select a project and get the S3 URL to upload your raw data files.</div>
+    
+    <div class="field">
+      <label>Select Tenant</label>
+      <select id="tenant-select">
+        <option value="" disabled selected>Select a tenant</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Select Project</label>
+      <select id="project-select" disabled>
+        <option value="" disabled selected>Select a project</option>
+      </select>
+    </div>
+    
+    <div id="url-section" style="display: none;">
+      <div class="field">
+        <label>Raw Data Upload URL</label>
+        <div class="url-display">
+          <span class="url-text" id="s3-raw-url">-</span>
+          <button class="copy-btn" onclick="copyUrl('s3-raw-url')">Copy</button>
+        </div>
+      </div>
+      
+      <div class="info-box">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <div class="info-box-text">
+          Upload your raw data files to this S3 URL.
+        </div>
+      </div>
+      
+      <div class="step-actions">
+        <button class="btn secondary" disabled>Previous</button>
+        <div class="btn-group">
+          <button class="btn secondary" onclick="window.location.href='/admin/customers?tab=projects'">Cancel</button>
+          <button class="btn primary" onclick="goToStep(2)">Next: Labelling</button>
+        </div>
+      </div>
+    </div>
+    
+    <div id="generate-section">
+      <div class="step-actions">
+        <button class="btn secondary" disabled>Previous</button>
+        <div class="btn-group">
+          <button class="btn secondary" onclick="window.location.href='/admin/customers?tab=projects'">Cancel</button>
+          <button class="btn primary" id="generate-btn" onclick="generateS3Url()">Get S3 URL</button>
+          <span id="generate-spinner" class="spinner hidden" aria-label="loading"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Step 2: Labelling -->
+  <div class="step-content hidden" id="step-2">
+    <div class="step-header">Data Labelling</div>
+    <div class="step-description">Annotate your preprocessed data to create ground truth labels for training.</div>
+    
+    <!-- S3 Path Display -->
+    <div class="field">
+      <label>Annotation Labels Path</label>
+      <div class="url-display">
+        <span class="url-text" id="s3-annotate-label-url">Loading...</span>
+        <button class="copy-btn" onclick="copyUrl('s3-annotate-label-url')">Copy</button>
+      </div>
+    </div>
+    
+    <div class="step-actions">
+      <button class="btn secondary" onclick="goToStep(1)">Previous</button>
+      <div class="btn-group">
+        <button class="btn secondary" onclick="window.location.href='/admin/customers?tab=projects'">Cancel</button>
+        <button class="btn primary" onclick="goToStep(3)">Next: Training</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Step 3: Training -->
+  <div class="step-content hidden" id="step-3">
+    <div class="step-header">Model Training</div>
+    <div class="step-description">Configure training parameters and start model training.</div>
+    
+    <!-- S3 Paths Display -->
+    <div style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px;">
+    <div class="field">
+        <label>Preprocessed Data Path</label>
+        <div class="url-display">
+          <span class="url-text" id="s3-preprocessed-url">Loading...</span>
+          <button class="copy-btn" onclick="copyUrl('s3-preprocessed-url')">Copy</button>
+        </div>
+    </div>
+    <div class="field">
+        <label>Annotate Tool Path</label>
+        <div class="url-display">
+          <span class="url-text" id="s3-annotate-tool-url">Loading...</span>
+          <button class="copy-btn" onclick="copyUrl('s3-annotate-tool-url')">Copy</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="step-actions">
+      <button class="btn secondary" onclick="goToStep(2)">Previous</button>
+      <div class="btn-group">
+        <button class="btn secondary" onclick="window.location.href='/admin/customers?tab=projects'">Cancel</button>
+        <button class="btn primary" onclick="goToStep(4)">Next: Inference</button>
+      </div>
+    </div>
+    </div>
+    
+  <!-- Step 4: Inference -->
+  <div class="step-content hidden" id="step-4">
+    <div class="step-header">Model Inference</div>
+    <div class="step-description">Run predictions on new data using your trained model.</div>
+    
+    <!-- S3 Path Display -->
+    <div class="field">
+      <label>Inference Base Path</label>
+      <div class="url-display">
+        <span class="url-text" id="s3-inference-base-url">Loading...</span>
+        <button class="copy-btn" onclick="copyUrl('s3-inference-base-url')">Copy</button>
+    </div>
+    </div>
+    
+    <div class="step-actions">
+      <button class="btn secondary" onclick="goToStep(3)">Previous</button>
+      <div class="btn-group">
+        <button class="btn secondary" onclick="window.location.href='/admin/customers?tab=projects'">Cancel</button>
+        <button class="btn primary" onclick="window.location.href='/admin/customers?tab=projects'">Complete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var currentStep = 1;
+  var selectedTenant = null;
+  var selectedProject = null;
+  var bucketConfigId = null;
+  var projectSelect = document.getElementById('project-select');
+  
+  // Fetch and populate tenants
+  function loadTenants(){
+    fetch('/tenant')
+      .then(function(r){ return r.json(); })
+      .then(function(tenants){
+        var tenantSelect = document.getElementById('tenant-select');
+        tenantSelect.innerHTML = '<option value="" disabled selected>Select a tenant</option>';
+        tenants.forEach(function(t){
+          var opt = document.createElement('option');
+          opt.value = t._id || t.id;
+          opt.textContent = t.name || t.company_name || t.email || (t._id || t.id);
+          tenantSelect.appendChild(opt);
+        });
+      })
+      .catch(function(e){ console.error('Error loading tenants:', e); });
+  }
+
+  // Fetch and populate projects for a tenant
+  function loadProjectsForTenant(tenantId){
+    var projectSelect = document.getElementById('project-select');
+    projectSelect.disabled = true;
+    projectSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+
+    var url = '/project' + (tenantId ? ('?tenant_id=' + encodeURIComponent(tenantId)) : '');
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(projects){
+        projectSelect.innerHTML = '<option value="" disabled selected>Select a project</option>';
+        projects
+          .filter(function(p){ return !tenantId || p.tenant_id === tenantId; })
+          .forEach(function(p){
+            var opt = document.createElement('option');
+            opt.value = p._id || p.id;
+            opt.textContent = p.name;
+            opt.setAttribute('data-tenant-id', p.tenant_id);
+            projectSelect.appendChild(opt);
+          });
+        projectSelect.disabled = false;
+      })
+      .catch(function(e){ 
+        console.error('Error loading projects:', e);
+        projectSelect.innerHTML = '<option value="" disabled selected>Error loading projects</option>';
+      });
+  }
+  
+  var tenantSelect = document.getElementById('tenant-select');
+  var projectSelect = document.getElementById('project-select');
+
+  tenantSelect.addEventListener('change', function(){
+    selectedTenant = tenantSelect.value;
+    // reset project and config
+    selectedProject = null;
+    bucketConfig = null;
+    document.getElementById('generate-btn').disabled = true;
+    document.getElementById('url-section').style.display = 'none';
+    document.getElementById('generate-section').style.display = 'block';
+    loadProjectsForTenant(selectedTenant);
+  });
+
+  projectSelect.addEventListener('change', function(){
+    var opt = projectSelect.options[projectSelect.selectedIndex];
+    selectedProject = {
+      id: opt.value,
+      name: opt.textContent,
+      tenant_id: opt.getAttribute('data-tenant-id')
+    };
+    // when project selected, check existing config and toggle UI
+    checkAndRenderConfig();
+  });
+
+  function checkAndRenderConfig(){
+    document.getElementById('s3-raw-url').textContent = '-';
+    document.getElementById('url-section').style.display = 'none';
+    document.getElementById('generate-section').style.display = 'block';
+    document.getElementById('generate-btn').disabled = true;
+
+    if (!selectedProject) return;
+
+    fetch('/bucket-config?project_id=' + encodeURIComponent(selectedProject.id))
+      .then(function(r){ return r.json(); })
+      .then(function(items){
+        if (Array.isArray(items) && items.length > 0 && items[0].folder_structure && items[0].folder_structure.raw_data){
+          bucketConfig = items[0];
+          document.getElementById('s3-raw-url').textContent = bucketConfig.folder_structure.raw_data;
+          document.getElementById('generate-section').style.display = 'none';
+          document.getElementById('url-section').style.display = 'block';
+        } else {
+          bucketConfig = null;
+          document.getElementById('generate-btn').disabled = false;
+        }
+      })
+      .catch(function(e){ console.error('Error checking config:', e); document.getElementById('generate-btn').disabled = false; });
+  }
+
+  window.generateS3Url = function(){
+    if (!selectedProject) {
+      showToast('Please select a project', 'error');
+      return;
+    }
+    // show spinner
+    var spinner = document.getElementById('generate-spinner');
+    if (spinner) spinner.classList.remove('hidden');
+    document.getElementById('generate-btn').disabled = true;
+    
+    // 1) Check if bucket-config already exists for this project
+    fetch('/bucket-config?project_id=' + encodeURIComponent(selectedProject.id))
+      .then(function(r){ 
+        if (!r.ok) throw new Error('Failed to check existing config');
+        return r.json(); 
+      })
+      .then(function(items){
+        // If config exists with raw_data_url, just display it
+        if (Array.isArray(items) && items.length > 0) {
+          var cfg = items[0];
+          bucketConfigId = cfg._id || cfg.id;
+          bucketConfig = cfg; // Store globally
+          
+          // Check if folder_structure exists
+          if (cfg.folder_structure && cfg.folder_structure.raw_data) {
+            // URL already exists, just display it
+            document.getElementById('s3-raw-url').textContent = cfg.folder_structure.raw_data;
+            document.getElementById('generate-section').style.display = 'none';
+            document.getElementById('url-section').style.display = 'block';
+            showToast('S3 URLs already configured for this project', 'success');
+            return null; // Don't proceed further
+          }
+        }
+        
+        // 2) No existing config found, create new one with raw data URL
+        var rawDataUrl = 's3:/' + selectedProject.tenant_id + '/project/' + selectedProject.id + '/data/raw/';
+        var payload = {
+          tenant_id: selectedProject.tenant_id,
+          project_id: selectedProject.id,
+          raw_data_url: rawDataUrl,
+          status: 'active'
+        };
+    
+         return fetch('/bucket-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        .then(function(r){
+          if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || 'Failed to create S3 URL'); });
+          return r.json();
+        })
+        .then(function(data){
+          if (!data) return; // Skip if already handled
+          bucketConfigId = data._id || data.id;
+          bucketConfig = data; // Store globally
+          document.getElementById('s3-raw-url').textContent = data.folder_structure.raw_data;
+      document.getElementById('generate-section').style.display = 'none';
+      document.getElementById('url-section').style.display = 'block';
+          showToast('S3 folders created successfully!', 'success');
+        });
+      })
+      .catch(function(e){
+        showToast(e.message || 'Failed to configure S3 URL', 'error');
+        })
+        .finally(function(){
+          var spinner = document.getElementById('generate-spinner');
+          if (spinner) spinner.classList.add('hidden');
+          var btn = document.getElementById('generate-btn');
+          if (btn) btn.disabled = false;
+        });
+  };
+  
+  window.copyUrl = function(elId){
+    var element = document.getElementById(elId);
+    if (!element) {
+      showToast('Element not found', 'error');
+      return;
+    }
+    
+    var urlText = element.textContent.trim();
+    
+    // Check if the URL is valid (not placeholder text)
+    if (!urlText || urlText === '-' || urlText === 'Loading...' || urlText === 'Not configured' || urlText === 'Error loading') {
+      showToast('No valid URL to copy', 'warning');
+      return;
+    }
+    
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(urlText).then(function(){
+        showToast('URL copied to clipboard', 'success');
+      }).catch(function(err){
+        console.error('Clipboard API failed:', err);
+        // Fallback to older method
+        fallbackCopyTextToClipboard(urlText);
+      });
+    } else {
+      // Fallback for older browsers
+      fallbackCopyTextToClipboard(urlText);
+    }
+  };
+  
+  // Fallback copy function for older browsers
+  function fallbackCopyTextToClipboard(text) {
+    var textArea = document.createElement('textarea');
+    textArea.value = text;
+    
+    // Avoid scrolling to bottom
+    textArea.style.top = '0';
+    textArea.style.left = '0';
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+      var successful = document.execCommand('copy');
+      if (successful) {
+        showToast('URL copied to clipboard', 'success');
+      } else {
+        showToast('Failed to copy URL', 'error');
+      }
+    } catch (err) {
+      console.error('Fallback copy failed:', err);
+      showToast('Failed to copy URL', 'error');
+    }
+    
+    document.body.removeChild(textArea);
+  }
+  
+  // Global bucket config
+  var bucketConfig = null;
+  
+  // Step Navigation
+  window.goToStep = function(step){
+    // Validate that project is selected and bucket config exists
+    if (!selectedProject) {
+      showToast('Please select a project in Step 1 first', 'error');
+      return;
+    }
+    
+    if (!bucketConfig && step > 1) {
+      showToast('Please generate S3 URLs in Step 1 first', 'error');
+      return;
+    }
+    
+    // Hide all steps
+    for (var i = 1; i <= 4; i++) {
+      var stepEl = document.getElementById('step-' + i);
+      if (stepEl) stepEl.classList.add('hidden');
+    }
+    
+    // Update step indicators
+    for (var i = 1; i <= 4; i++) {
+      var indicator = document.getElementById('step-indicator-' + i);
+      indicator.classList.remove('active', 'completed', 'disabled');
+      if (i < step) {
+        indicator.classList.add('completed');
+      } else if (i === step) {
+        indicator.classList.add('active');
+      } else {
+        indicator.classList.add('disabled');
+      }
+    }
+    
+    // Show target step
+    var targetStep = document.getElementById('step-' + step);
+    if (targetStep) targetStep.classList.remove('hidden');
+    currentStep = step;
+    
+    // Load data for the step
+    if (step === 2) {
+      loadBucketConfigPaths();
+    }
+    if (step === 3) {
+      loadBucketConfigPaths();
+    }
+    if (step === 4) {
+      loadBucketConfigPaths();
+    }
+  };
+  
+  // Load bucket config paths from API
+  window.loadBucketConfigPaths = function(){
+    if (!selectedProject) {
+      showToast('Please select a project first', 'error');
+      return;
+    }
+    
+    console.log('Loading bucket config for project:', selectedProject.id);
+    
+    // Fetch bucket config from API (actual API call, not hardcoded)
+    fetch('/bucket-config?project_id=' + encodeURIComponent(selectedProject.id))
+      .then(function(r){ 
+        if (!r.ok) throw new Error('Failed to load bucket config');
+        return r.json(); 
+      })
+      .then(function(items){
+        console.log('Bucket config response:', items);
+        
+        if (Array.isArray(items) && items.length > 0) {
+          bucketConfig = items[0];
+          var fs = bucketConfig.folder_structure;
+          
+          console.log('Folder structure:', fs);
+          
+          if (!fs) {
+            // No folder structure found
+            if (currentStep === 2) document.getElementById('s3-annotate-label-url').textContent = 'Not configured';
+            if (currentStep === 3) {
+              document.getElementById('s3-preprocessed-url').textContent = 'Not configured';
+              document.getElementById('s3-annotate-tool-url').textContent = 'Not configured';
+            }
+            if (currentStep === 4) document.getElementById('s3-inference-base-url').textContent = 'Not configured';
+            showToast('Folder structure not found. Please generate S3 URLs in Step 1.', 'warning');
+        return;
+      }
+      
+          // Step 2: Labelling - show annotate label path (from API)
+          if (currentStep === 2 && fs.annotate_label) {
+            document.getElementById('s3-annotate-label-url').textContent = fs.annotate_label;
+          }
+          
+          // Step 3: Training - show preprocessed and annotate tool paths (from API)
+          if (currentStep === 3) {
+            if (fs.preprocessed_data) {
+              document.getElementById('s3-preprocessed-url').textContent = fs.preprocessed_data;
+            }
+            if (fs.annotate_tool) {
+              document.getElementById('s3-annotate-tool-url').textContent = fs.annotate_tool;
+            }
+          }
+          
+          // Step 4: Inference - show inference base path (from API)
+          if (currentStep === 4 && fs.inference_input_model) {
+            var basePath = fs.inference_input_model.replace('/input_model/', '/');
+            document.getElementById('s3-inference-base-url').textContent = basePath;
+          }
+        } else {
+          // No bucket config found
+          if (currentStep === 2) document.getElementById('s3-annotate-label-url').textContent = 'Not configured';
+          if (currentStep === 3) {
+            document.getElementById('s3-preprocessed-url').textContent = 'Not configured';
+            document.getElementById('s3-annotate-tool-url').textContent = 'Not configured';
+          }
+          if (currentStep === 4) document.getElementById('s3-inference-base-url').textContent = 'Not configured';
+          showToast('No bucket config found. Please generate S3 URLs in Step 1.', 'warning');
+        }
+    })
+    .catch(function(e){
+        console.error('Error loading bucket config paths:', e);
+        // Show error in UI
+        if (currentStep === 2) document.getElementById('s3-annotate-label-url').textContent = 'Error loading';
+        if (currentStep === 3) {
+          document.getElementById('s3-preprocessed-url').textContent = 'Error loading';
+          document.getElementById('s3-annotate-tool-url').textContent = 'Error loading';
+        }
+        if (currentStep === 4) document.getElementById('s3-inference-base-url').textContent = 'Error loading';
+        showToast('Failed to load S3 paths', 'error');
+    });
+  };
+  
+   loadTenants();
+})();
+</script>
+{% endblock %}
