@@ -19,7 +19,9 @@ database_config = {
     "BUCKET_CONFIG_COLLECTION": "bucket_configs",
     "DATASET_CONFIG_COLLECTION": "dataset_configs",
     "MODEL_CONFIG_COLLECTION": "model_configs",
-    "PROJECT_COLLECTION": "projects"
+    "PROJECT_COLLECTION": "projects",
+    "TRAIN_CONFIG_COLLECTION": "train_configs",
+    "TRAIN_RUN_COLLECTION": "train_runs"
 }
 
 # try:

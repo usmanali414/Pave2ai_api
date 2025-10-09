@@ -23,6 +23,39 @@ def _project_validator() -> Dict[str, Any]:
     }
 
 
+def _train_config_validator() -> Dict[str, Any]:
+    return {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": [
+                "name",
+                "tenant_id",
+                "project_id",
+                "metadata",
+                "created_at",
+                "updated_at",
+            ],
+            "properties": {
+                "name": {"bsonType": "string"},
+                "tenant_id": {"bsonType": "string"},
+                "project_id": {"bsonType": "string"},
+                # metadata contains data_parser, model_name, initial_weights
+                "metadata": {
+                    "bsonType": "object",
+                    "properties": {
+                        "data_parser": {"bsonType": ["string", "null"]},
+                        "model_name": {"bsonType": ["string", "null"]},
+                        "initial_weights": {"bsonType": ["bool", "null"]},
+                    },
+                },
+                "created_at": {"bsonType": "date"},
+                "updated_at": {"bsonType": "date"},
+                "deleted_at": {"bsonType": ["date", "null"]},
+            },
+        }
+    }
+
+
 def _bucket_config_validator() -> Dict[str, Any]:
     return {
         "$jsonSchema": {
@@ -162,6 +195,8 @@ async def ensure_collections_and_indexes() -> None:
     # Add collections conditionally based on keys present in config
     if "PROJECT_COLLECTION" in database_config:
         collections[database_config["PROJECT_COLLECTION"]] = _project_validator()
+    if "TRAIN_CONFIG_COLLECTION" in database_config:
+        collections[database_config["TRAIN_CONFIG_COLLECTION"]] = _train_config_validator()
     if "BUCKET_CONFIG_COLLECTION" in database_config:
         collections[database_config["BUCKET_CONFIG_COLLECTION"]] = _bucket_config_validator()
     if "DATASET_CONFIG_COLLECTION" in database_config:
@@ -174,6 +209,27 @@ async def ensure_collections_and_indexes() -> None:
         collections[database_config["USER_COLLECTION"]] = _user_validator_lenient()
     if "ADMIN_COLLECTION" in database_config:
         collections[database_config["ADMIN_COLLECTION"]] = _admin_validator()
+    if "TRAIN_RUN_COLLECTION" in database_config:
+        # define validator locally to keep file organized near ensure function
+        collections[database_config["TRAIN_RUN_COLLECTION"]] = {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": [
+                    "train_config_id",
+                    "status",
+                    "created_at",
+                    "updated_at",
+                ],
+                "properties": {
+                    "train_config_id": {"bsonType": "string"},
+                    # status examples: training, completed, failed, cancelled
+                    "status": {"bsonType": "string"},
+                    "created_at": {"bsonType": "date"},
+                    "updated_at": {"bsonType": "date"},
+                    "ended_at": {"bsonType": ["date", "null"]},
+                },
+            }
+        }
 
     existing = await db.list_collection_names()
 
@@ -240,5 +296,29 @@ async def ensure_collections_and_indexes() -> None:
             )
         except Exception as e:
             logger.warning(f"Create index bucket_configs (tenant_id,project_id) failed or exists: {e}")
+
+    if "TRAIN_CONFIG_COLLECTION" in database_config:
+        try:
+            await db[database_config["TRAIN_CONFIG_COLLECTION"]].create_index(
+                [("tenant_id", 1), ("project_id", 1)], unique=False, name="idx_train_tenant_project"
+            )
+        except Exception as e:
+            logger.warning(f"Create index train_configs (tenant_id,project_id) failed or exists: {e}")
+
+        # Enforce single train_config per project
+        try:
+            await db[database_config["TRAIN_CONFIG_COLLECTION"]].create_index(
+                "project_id", unique=True, name="uniq_train_config_per_project"
+            )
+        except Exception as e:
+            logger.warning(f"Create unique index train_configs.project_id failed or exists: {e}")
+
+    if "TRAIN_RUN_COLLECTION" in database_config:
+        try:
+            await db[database_config["TRAIN_RUN_COLLECTION"]].create_index(
+                [("train_config_id", 1), ("status", 1)], unique=False, name="idx_train_run_config_status"
+            )
+        except Exception as e:
+            logger.warning(f"Create index train_runs (train_config_id,status) failed or exists: {e}")
 
 
