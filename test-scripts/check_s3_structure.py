@@ -33,21 +33,21 @@ def check_project_structure(tenant_id: str, project_id: str, verbose: bool = Fal
         print("❌ S3 client not initialized. Check AWS credentials in .env")
         return {"success": False, "error": "S3 not initialized"}
     
-    base_path = f"{tenant_id}/project/{project_id}"
+    base_path = f"accounts/{tenant_id}/project/{project_id}"
     
     # Define all required folders
     required_folders = [
         f"{base_path}/user/logs/",
         f"{base_path}/data/raw/",
         f"{base_path}/data/preprocessed/",
-        f"{base_path}/data/annotate/tool/",
-        f"{base_path}/data/annotate/label/",
-        f"{base_path}/data/train/input_model/",
-        f"{base_path}/data/train/output_model/",
-        f"{base_path}/data/train/output_metadata/",
-        f"{base_path}/data/inference/input_model/",
-        f"{base_path}/data/inference/output_labels/",
-        f"{base_path}/data/inference/output_metadata/",
+        f"{base_path}/annotate/tool/",
+        f"{base_path}/annotate/label/",
+        f"{base_path}/train/input_model/",
+        f"{base_path}/train/output_model/",
+        f"{base_path}/train/output_metadata/",
+        f"{base_path}/inference/input_model/",
+        f"{base_path}/inference/output_labels/",
+        f"{base_path}/inference/output_metadata/",
     ]
     
     bucket = s3_client.resource.Bucket(S3_DATA_BUCKET)
@@ -202,10 +202,10 @@ def list_all_projects_in_bucket(verbose: bool = False) -> List[Dict]:
             key = obj.key
             parts = key.split('/')
             
-            # Looking for pattern: {tenant_id}/project/{project_id}/...
-            if len(parts) >= 3 and parts[1] == 'project':
-                tenant_id = parts[0]
-                project_id = parts[2]
+            # Looking for pattern: accounts/{tenant_id}/project/{project_id}/...
+            if len(parts) >= 4 and parts[0] == 'accounts' and parts[2] == 'project':
+                tenant_id = parts[1]
+                project_id = parts[3]
                 
                 # Add to set to avoid duplicates
                 project_key = (tenant_id, project_id)
@@ -316,7 +316,7 @@ Examples:
         if args.tree:
             try:
                 bucket = s3_client.resource.Bucket(S3_DATA_BUCKET)
-                base_path = f"{args.tenant}/project/{args.project}/"
+                base_path = f"accounts/{args.tenant}/project/{args.project}/"
                 
                 print(f"\n{'='*60}")
                 print(f"Folder structure for project:")
@@ -340,9 +340,10 @@ Examples:
                                 current = current[part]
                 
                 if project_tree:
-                    print(f"📁 {args.tenant}/")
-                    print(f"└── project/")
-                    print(f"    └── {args.project}/")
+                    print(f"📁 accounts/")
+                    print(f"└── {args.tenant}/")
+                    print(f"    └── project/")
+                    print(f"        └── {args.project}/")
                     # Print from 4 spaces indent (under project_id)
                     print_tree(project_tree, "        ", True, 0)
                     print()

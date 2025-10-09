@@ -1,0 +1,357 @@
+{% extends "admin/base.html" %}
+{% block title %}Train Settings{% endblock %}
+{% block head %}
+<style>
+  .settings-container { max-width: 980px; margin: 0 auto; }
+  .page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab { padding: 10px 12px; border: 1px solid var(--border); border-bottom: none; border-radius: 10px 10px 0 0; background: #f8f9ff; color:#374151; font-weight:600; cursor: pointer; }
+  .tab.active { background: #fff; color: var(--primary); border-color: var(--border); }
+  .subtabs { display: flex; gap: 8px; margin: 0 0 14px 0; }
+  .subtab { padding: 8px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color:#374151; cursor: pointer; font-size: 13px; }
+  .subtab.active { background: #ede9fe; color:#5b21b6; border-color:#c4b5fd; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .field input, .field select { width: 100%; height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; }
+  .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+  .hint { font-size: 12px; color: #6b7280; }
+  .spinner { width: 28px; height: 28px; border: 2px solid #e5e7eb; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; }
+  .hidden { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Toggle style for initial weights */
+  .checkbox-wrapper-17 { display: flex; align-items: center; gap: 10px; }
+  .checkbox-wrapper-17 input[type=checkbox] { height: 0; width: 0; visibility: hidden; }
+  .checkbox-wrapper-17 label { --size: 50px; cursor: pointer; width: var(--size); height: calc(var(--size) / 2); background: grey; display: block; border-radius: 100px; position: relative; margin: 0; }
+  .checkbox-wrapper-17 label:after { content: ''; position: absolute; top: 6%; left: 2.5%; width: calc(50% - 5%); height: calc(100% - 11%); background: #fff; border-radius: 90px; transition: 0.3s; }
+  .checkbox-wrapper-17 input:checked + label { background: #bada55; }
+  .checkbox-wrapper-17 input:checked + label:after { left: calc(100% - 2.5%); transform: translateX(-100%); }
+  .checkbox-wrapper-17 label:active:after { width: 55%; }
+  .checkbox-wrapper-17 .toggle-text { font-size: 15px; color: var(--primary); font-weight: 600; display: inline-block; line-height: 25px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="settings-container">
+  <div id="page-title" class="page-title">Train Settings</div>
+
+  
+
+  <div class="panel" id="panel-create-config">
+    <div class="row">
+      <div class="field">
+        <label>Configuration Name</label>
+        <input id="cfg-name" type="text" placeholder="Enter configuration name" />
+      </div>
+      <div class="field">
+        <label>Tenant</label>
+        <select id="tenant-select">
+          <option value="" disabled selected>Select a tenant</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Project</label>
+        <select id="project-select" disabled>
+          <option value="" disabled selected>Select a project</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Data Parser</label>
+        <select id="data-parser">
+          <option value="RIEGL PARSER" selected>RIEGL PARSER</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Model Name</label>
+        <select id="model-name">
+          <option value="AMCNN" selected>AMCNN</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Model Version</label>
+        <select id="model-version">
+          <option value="v1" selected>v1</option>
+          <option value="v2">v2</option>
+          <option value="v3">v3</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="checkbox-wrapper-17">
+          <input id="initial-weights" type="checkbox" />
+          <label for="initial-weights"></label>
+          <span class="toggle-text">Load Initial Weights</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" onclick="resetForm()">Reset</button>
+      <button class="btn primary" onclick="createTrainConfig()">Create Configuration</button>
+    </div>
+  </div>
+
+  
+  <div class="panel" id="panel-train" style="display: none; margin-top: 16px;">
+    <div class="row">
+      <div class="field">
+        <label>Select Tenant</label>
+        <select id="tenant-select-train">
+          <option value="" disabled selected>Select a tenant</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Select Project</label>
+        <select id="project-select-train" disabled>
+          <option value="" disabled selected>Select a project</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Select Train Configuration</label>
+        <select id="train-config-select" disabled>
+          <option value="" disabled selected>Select a configuration</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="btn-start-train" disabled onclick="startTraining()">Start Training</button>
+      <span id="train-spinner" class="spinner hidden" aria-label="loading"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Show correct panel based on ?sub= param
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var sub = params.get('sub') || 'create';
+    var pCreate = document.getElementById('panel-create-config');
+    var pTrain = document.getElementById('panel-train');
+    var titleEl = document.getElementById('page-title');
+    if (sub === 'train') {
+      if (pCreate) pCreate.style.display = 'none';
+      if (pTrain) pTrain.style.display = '';
+      if (titleEl) titleEl.textContent = 'Training';
+    } else {
+      if (pCreate) pCreate.style.display = '';
+      if (pTrain) pTrain.style.display = 'none';
+      if (titleEl) titleEl.textContent = 'Create Train Configuration';
+    }
+  } catch(e) {}
+  var tenantSelect = document.getElementById('tenant-select');
+  var projectSelect = document.getElementById('project-select');
+  var tenantSelectTrain = document.getElementById('tenant-select-train');
+  var projectSelectTrain = document.getElementById('project-select-train');
+  var trainConfigSelect = document.getElementById('train-config-select');
+
+  function loadTenants(){
+    fetch('/tenant')
+      .then(function(r){ return r.json(); })
+      .then(function(list){
+        tenantSelect.innerHTML = '<option value="" disabled selected>Select a tenant</option>';
+        (list||[]).forEach(function(t){
+          var opt = document.createElement('option');
+          opt.value = t._id || t.id; opt.textContent = t.name || t.email || opt.value;
+          tenantSelect.appendChild(opt);
+        });
+        // also for training panel
+        tenantSelectTrain.innerHTML = '<option value="" disabled selected>Select a tenant</option>';
+        (list||[]).forEach(function(t){
+          var opt2 = document.createElement('option');
+          opt2.value = t._id || t.id; opt2.textContent = t.name || t.email || opt2.value;
+          tenantSelectTrain.appendChild(opt2);
+        });
+      }).catch(function(e){ console.error('Load tenants failed', e); });
+  }
+
+  function loadProjects(tenantId){
+    projectSelect.disabled = true;
+    projectSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+    var url = '/project' + (tenantId ? ('?tenant_id=' + encodeURIComponent(tenantId)) : '');
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(list){
+        projectSelect.innerHTML = '<option value="" disabled selected>Select a project</option>';
+        (list||[]).forEach(function(p){
+          var opt = document.createElement('option');
+          opt.value = p._id || p.id; opt.textContent = p.name; opt.setAttribute('data-tenant-id', p.tenant_id);
+          projectSelect.appendChild(opt);
+        });
+        projectSelect.disabled = false;
+      }).catch(function(e){ console.error('Load projects failed', e); });
+  }
+
+  function loadProjectsTrain(tenantId){
+    projectSelectTrain.disabled = true;
+    projectSelectTrain.innerHTML = '<option value="" disabled selected>Loading...</option>';
+    var url = '/project' + (tenantId ? ('?tenant_id=' + encodeURIComponent(tenantId)) : '');
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(list){
+        projectSelectTrain.innerHTML = '<option value="" disabled selected>Select a project</option>';
+        (list||[]).forEach(function(p){
+          var opt = document.createElement('option');
+          opt.value = p._id || p.id; opt.textContent = p.name; opt.setAttribute('data-tenant-id', p.tenant_id);
+          projectSelectTrain.appendChild(opt);
+        });
+        projectSelectTrain.disabled = false;
+        trainConfigSelect.innerHTML = '<option value="" disabled selected>Select a configuration</option>';
+        trainConfigSelect.disabled = true;
+        document.getElementById('btn-start-train').disabled = true;
+      }).catch(function(e){ console.error('Load projects failed', e); });
+  }
+
+  function loadTrainConfigs(projectId){
+    trainConfigSelect.disabled = true;
+    trainConfigSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+    fetch('/train-config?project_id=' + encodeURIComponent(projectId))
+      .then(function(r){ if (r.status===404) return []; return r.json(); })
+      .then(function(list){
+        trainConfigSelect.innerHTML = '<option value="" disabled selected>Select a configuration</option>';
+        if (Array.isArray(list)){
+          list.forEach(function(cfg){
+            var opt = document.createElement('option');
+            opt.value = cfg._id || cfg.id; opt.textContent = cfg.name || (cfg._id || cfg.id);
+            trainConfigSelect.appendChild(opt);
+          });
+        }
+        trainConfigSelect.disabled = false;
+        document.getElementById('btn-start-train').disabled = !trainConfigSelect.value;
+      }).catch(function(e){ console.error('Load train configs failed', e); });
+  }
+
+  tenantSelect.addEventListener('change', function(){
+    var tenantId = tenantSelect.value;
+    projectSelect.value = '';
+    if (tenantId) loadProjects(tenantId);
+  });
+
+  // training panel events
+  tenantSelectTrain.addEventListener('change', function(){
+    var tenantId = tenantSelectTrain.value;
+    projectSelectTrain.value = '';
+    trainConfigSelect.innerHTML = '<option value="" disabled selected>Select a configuration</option>';
+    trainConfigSelect.disabled = true;
+    document.getElementById('btn-start-train').disabled = true;
+    if (tenantId) loadProjectsTrain(tenantId);
+  });
+  projectSelectTrain.addEventListener('change', function(){
+    var projectId = projectSelectTrain.value;
+    if (projectId) loadTrainConfigs(projectId);
+  });
+  trainConfigSelect.addEventListener('change', function(){
+    document.getElementById('btn-start-train').disabled = !trainConfigSelect.value;
+  });
+
+  window.resetForm = function(){
+    document.getElementById('cfg-name').value = '';
+    tenantSelect.value = '';
+    projectSelect.innerHTML = '<option value="" disabled selected>Select a project</option>';
+    projectSelect.disabled = true;
+    document.getElementById('data-parser').value = 'RIEGL PARSER';
+    document.getElementById('model-name').value = 'AMCNN';
+    var mv = document.getElementById('model-version'); if (mv) mv.value = 'v1';
+    document.getElementById('initial-weights').checked = false;
+  };
+
+  window.createTrainConfig = function(){
+    var name = (document.getElementById('cfg-name').value || '').trim();
+    var tenant_id = tenantSelect.value;
+    var project_id = projectSelect.value;
+    var data_parser = document.getElementById('data-parser').value;
+    var model_name = document.getElementById('model-name').value;
+    var model_version = document.getElementById('model-version').value;
+    var initial_weights = !!document.getElementById('initial-weights').checked;
+
+    if (!name || !tenant_id || !project_id){
+      showToast('Name, tenant and project are required', 'error');
+      return;
+    }
+
+    // First check if a config already exists for this project
+    fetch('/train-config?project_id=' + encodeURIComponent(project_id))
+      .then(function(r){ if (r.status === 404) return []; return r.json(); })
+      .then(function(list){
+        if (Array.isArray(list) && list.length > 0){
+          showToast('Train config already present. Please select a different project.', 'error');
+          return null;
+        }
+        var payload = {
+      name: name,
+      tenant_id: tenant_id,
+      project_id: project_id,
+      model_version: model_version,
+      metadata: {
+        data_parser: data_parser,
+        model_name: model_name,
+        initial_weights: initial_weights
+      }
+    };
+
+        return fetch('/train-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+      })
+      .then(function(r){ if(!r) return null; if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || 'Failed to create configuration'); }); return r.json(); })
+      .then(function(data){ if (!data) return; showToast('Train configuration created', 'success'); resetForm(); })
+      .catch(function(e){ if(e) showToast(e.message || 'Failed', 'error'); });
+  };
+
+  window.startTraining = function(){
+    var cfgId = trainConfigSelect.value;
+    if (!cfgId){ showToast('Please select a configuration', 'error'); return; }
+    var spinner = document.getElementById('train-spinner');
+    var btn = document.getElementById('btn-start-train');
+    if (spinner) spinner.classList.remove('hidden');
+    if (btn) btn.disabled = true;
+    // Immediate feedback when training is initiated
+    showToast('Training started...', 'success');
+    fetch('/train/' + encodeURIComponent(cfgId), { method: 'POST' })
+      .then(function(r){
+        if (r.status === 409) {
+          return r.json().then(function(j){
+            showToast(j.detail || 'Training already running for this configuration', 'error');
+            return null; // do not reset inputs
+          });
+        }
+        if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || 'Failed to start training'); });
+        return r.json();
+      })
+      .then(function(data){ if(!data) return; showToast('Training completed', 'success'); resetTrainForm(); })
+      .catch(function(e){ showToast(e.message || 'Failed', 'error'); })
+      .finally(function(){ if (spinner) spinner.classList.add('hidden'); if (btn) btn.disabled = !trainConfigSelect.value; });
+  };
+
+  function resetTrainForm(){
+    if (tenantSelectTrain) tenantSelectTrain.value = '';
+    if (projectSelectTrain){
+      projectSelectTrain.innerHTML = '<option value="" disabled selected>Select a project</option>';
+      projectSelectTrain.disabled = true;
+    }
+    if (trainConfigSelect){
+      trainConfigSelect.innerHTML = '<option value="" disabled selected>Select a configuration</option>';
+      trainConfigSelect.disabled = true;
+    }
+    var btn = document.getElementById('btn-start-train');
+    if (btn) btn.disabled = true;
+  }
+
+  loadTenants();
+})();
+</script>
+{% endblock %}
+
+

@@ -81,6 +81,13 @@
               <a id="pm-settings" href="/admin/project-settings?sub=settings">Project Settings</a>
             </div>
           </div>
+          <div>
+            <a href="/admin/train-settings" class="nav-parent" onclick="toggleTm(event)">Train Settings <span class="caret">▾</span></a>
+            <div id="tm-submenu" class="submenu">
+              <a id="tm-create" href="/admin/train-settings?sub=create">Create Configurations</a>
+              <a id="tm-train" href="/admin/train-settings?sub=train">Training</a>
+            </div>
+          </div>
         </nav>
       </aside>
       <header class="header">
@@ -132,6 +139,13 @@
           var href = event.currentTarget && event.currentTarget.getAttribute('href');
           if (href) { history.replaceState(null, '', href); }
         };
+        window.toggleTm = function(event){
+          event.preventDefault();
+          var sm = document.getElementById('tm-submenu');
+          if (sm) { sm.classList.toggle('show'); }
+          var href = event.currentTarget && event.currentTarget.getAttribute('href');
+          if (href) { history.replaceState(null, '', href + '?sub=create'); }
+        };
         // Auto-expand submenu and set active item
         try {
           var path = location.pathname;
@@ -159,6 +173,14 @@
               var p = document.getElementById('pm-projects');
               if (p) p.classList.add('primary');
             }
+          }
+          if (path.startsWith('/admin/train-settings')) {
+            var sm2 = document.getElementById('tm-submenu');
+            if (sm2) sm2.classList.add('show');
+            var p2 = new URLSearchParams(location.search);
+            var sub2 = p2.get('sub');
+            if (sub2 === 'train') { var t2 = document.getElementById('tm-train'); if (t2) t2.classList.add('primary'); }
+            else { var c2 = document.getElementById('tm-create'); if (c2) c2.classList.add('primary'); }
           }
         } catch(e) {}
       })();
