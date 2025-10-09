@@ -167,3 +167,12 @@ async def admin_project_settings(request: Request):
     return templates.TemplateResponse("project_management/project_settings.html", {"request": request})
 
 
+@router.get("/admin/train-settings", response_class=HTMLResponse)
+async def admin_train_settings(request: Request):
+    try:
+        _require_admin_cookie(request)
+    except HTTPException:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    sub = request.query_params.get("sub", "create")
+    return templates.TemplateResponse("training_management/train_settings.html", {"request": request, "sub": sub})
+
