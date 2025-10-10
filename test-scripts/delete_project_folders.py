@@ -28,7 +28,7 @@ def delete_project_folders(tenant_id: str, project_id: str, confirm: bool = Fals
         print("❌ S3 client not initialized. Check AWS credentials in .env")
         return False
     
-    base_path = f"{tenant_id}/project/{project_id}/"
+    base_path = f"accounts/{tenant_id}/project/{project_id}/"
     
     print(f"\n{'='*60}")
     print("⚠️  WARNING: DESTRUCTIVE OPERATION")
@@ -101,7 +101,7 @@ def delete_tenant_folders(tenant_id: str, confirm: bool = False) -> bool:
         print("❌ S3 client not initialized. Check AWS credentials in .env")
         return False
     
-    base_path = f"{tenant_id}/"
+    base_path = f"accounts/{tenant_id}/"
     
     print(f"\n{'='*60}")
     print("⚠️  WARNING: EXTREMELY DESTRUCTIVE OPERATION")
@@ -125,8 +125,8 @@ def delete_tenant_folders(tenant_id: str, confirm: bool = False) -> bool:
         projects = set()
         for obj in objects_to_delete:
             parts = obj.key.split('/')
-            if len(parts) >= 3 and parts[1] == 'project':
-                projects.add(parts[2])
+            if len(parts) >= 5 and parts[0] == 'accounts' and parts[2] == 'project':
+                projects.add(parts[3])
         
         print(f"\n📊 Found {len(projects)} project(s) with {len(objects_to_delete)} object(s) to delete")
         print(f"\nProjects that will be deleted:")
