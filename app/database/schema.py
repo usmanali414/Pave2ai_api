@@ -32,6 +32,7 @@ def _train_config_validator() -> Dict[str, Any]:
                 "tenant_id",
                 "project_id",
                 "metadata",
+                "model_version",
                 "created_at",
                 "updated_at",
             ],
@@ -39,6 +40,7 @@ def _train_config_validator() -> Dict[str, Any]:
                 "name": {"bsonType": "string"},
                 "tenant_id": {"bsonType": "string"},
                 "project_id": {"bsonType": "string"},
+                "model_version": {"bsonType": "string"},
                 # metadata contains data_parser, model_name, initial_weights
                 "metadata": {
                     "bsonType": "object",
@@ -227,6 +229,16 @@ async def ensure_collections_and_indexes() -> None:
                     "created_at": {"bsonType": "date"},
                     "updated_at": {"bsonType": "date"},
                     "ended_at": {"bsonType": ["date", "null"]},
+                    "step_status": {
+                        "bsonType": ["object", "null"],
+                        "properties": {
+                            "loading_data": {"bsonType": ["string", "null"]},
+                            "training": {"bsonType": ["string", "null"]},
+                            "saving_model": {"bsonType": ["string", "null"]}
+                        }
+                    },
+                    "results": {"bsonType": ["object", "null"]},
+                    "error": {"bsonType": ["string", "null"]}
                 },
             }
         }

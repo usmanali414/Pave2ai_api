@@ -110,12 +110,28 @@
     var body = '';
     body += inputField('Name','name','text', data && data.name);
     body += selectField('Tenant','tenant_id', getTenantOptions(), data && data.tenant_id, isEdit);
-    body += selectField('User (Owner)','user_id', getUserOptions(), data && data.user_id, isEdit);
+    // User options will be filtered by selected tenant after render
+    body += selectField('User (Owner)','user_id', [], data && data.user_id, isEdit);
     body += selectField('Status','status',['active','inactive'], data && data.status);
     var idAttr = data && data.id ? ' data-id="'+data.id+'"' : '';
     var html = '\n<div class="backdrop show" id="modal">\n  <div class="modal">\n    <header>'+title+'</header>\n    <div class="body">\n      <form id="modal-form"'+idAttr+'>\n        '+body+'\n      </form>\n    </div>\n    <div class="footer">\n      <button class="btn" onclick="closeModal(\'modal\')">Cancel</button>\n      <button id="modal-submit" class="btn primary">'+(isEdit?'Update':'Create')+'</button>\n    </div>\n  </div>\n</div>';
     modalRoot.innerHTML = html;
     document.getElementById('modal-submit').addEventListener('click', function(e){ e.preventDefault(); submitForm(isEdit); });
+    var formEl = document.getElementById('modal-form');
+    var tenantSelect = formEl && formEl.elements['tenant_id'];
+    var userSelect = formEl && formEl.elements['user_id'];
+    function applyTenantUserFilter(){
+      if (!tenantSelect || !userSelect) return;
+      var tenantId = tenantSelect.value;
+      var options = Object.keys(USER_MAP)
+        .filter(function(userId){ return (USER_TENANT_MAP[userId] === tenantId); })
+        .map(function(userId){ return { value: userId, label: USER_MAP[userId] }; });
+      var placeholder = '<option value="" disabled selected>Select user (owner)</option>';
+      userSelect.innerHTML = placeholder + options.map(function(o){ return '<option value="'+o.value+'">'+o.label+'</option>'; }).join('');
+      userSelect.disabled = !tenantId;
+    }
+    if (tenantSelect) tenantSelect.addEventListener('change', applyTenantUserFilter);
+    applyTenantUserFilter();
   }
 
   function confirmDelete(id){
@@ -204,6 +220,7 @@
   var TENANT_OPTIONS = [];
   var USER_MAP = {};
   var USER_OPTIONS = [];
+  var USER_TENANT_MAP = {};
 
   function rebuildTenantOptions(){ TENANT_OPTIONS = Object.keys(TENANT_MAP).map(function(id){ return { value: id, label: TENANT_MAP[id] }; }); }
   function getTenantOptions(){ return TENANT_OPTIONS; }
@@ -234,7 +251,14 @@
   function fetchUsers(){
     return fetch('/user').then(function(r){ return r.json(); }).then(function(list){
       if (Array.isArray(list)){
-        list.forEach(function(u){ var id = (u._id || u.id); var label = u.name || u.email || id; if (id) USER_MAP[id] = label; });
+        list.forEach(function(u){
+          var id = (u._id || u.id);
+          var label = u.name || u.email || id;
+          if (id) {
+            USER_MAP[id] = label;
+            USER_TENANT_MAP[id] = u.tenant_id;
+          }
+        });
         rebuildUserOptions();
         updateNames();
       }

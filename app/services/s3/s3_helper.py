@@ -13,17 +13,17 @@ class S3Helper:
     def generate_project_s3_path(tenant_id: str, project_id: str) -> str:
         """
         Generate the base S3 path for a project
-        Format: s3:{tenant_id}/project/{project_id}/
+        Format: s3:accounts/{tenant_id}/project/{project_id}/
         """
-        return f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/"
+        return f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/"
     
     @staticmethod
     def generate_raw_data_url(tenant_id: str, project_id: str) -> str:
         """
         Generate the raw data S3 URL for a project
-        Format: s3:{tenant_id}/project/{project_id}/data/raw/
+        Format: s3:accounts/{tenant_id}/project/{project_id}/data/raw/
         """
-        return f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/data/raw/"
+        return f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/data/raw/"
     
     @staticmethod
     def create_project_folder_structure(tenant_id: str, project_id: str) -> Dict[str, str]:
@@ -31,25 +31,26 @@ class S3Helper:
         Create the complete folder structure for a project in S3
         
         Structure:
-        {tenant_id}/
-          └── project/
-              └── {project_id}/
-                  ├── user/
-                  │   └── logs/
-                  ├── data/
-                  │   ├── raw/
-                  │   └── preprocessed/
-                  ├── annotate/
-                  │   ├── tool/
-                  │   └── label/
-                  ├── train/
-                  │   ├── input_model/
-                  │   ├── output_model/
-                  │   └── output_metadata/
-                  └── inference/
-                      ├── input_model/
-                      ├── output_labels/
-                      └── output_metadata/
+        accounts/
+            {tenant_id}/
+            └── project/
+                └── {project_id}/
+                    ├── user/
+                    │   └── logs/
+                    ├── data/
+                    │   ├── raw/
+                    │   └── preprocessed/
+                    ├── annotate/
+                    │   ├── tool/
+                    │   └── label/
+                    ├── train/
+                    │   ├── input_model/
+                    │   ├── output_model/
+                    │   └── output_metadata/
+                    └── inference/
+                        ├── input_model/
+                        ├── output_labels/
+                        └── output_metadata/
         
         Returns:
             Dict with all created folder URLs
@@ -58,7 +59,7 @@ class S3Helper:
             logger.warning("S3 client not initialized. Skipping folder creation.")
             return {"raw_data_url": S3Helper.generate_raw_data_url(tenant_id, project_id)}
         
-        base_path = f"{tenant_id}/project/{project_id}"
+        base_path = f"accounts/{tenant_id}/project/{project_id}"
         
         # Define all folder paths (annotate/train/inference are siblings of data)
         folders = [
@@ -103,17 +104,17 @@ class S3Helper:
             
             # Build complete folder structure dict
             folder_structure = {
-                "user_logs": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/user/logs/",
-                "raw_data": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/data/raw/",
-                "preprocessed_data": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/data/preprocessed/",
-                "annotate_tool": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/annotate/tool/",
-                "annotate_label": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/annotate/label/",
-                "train_input_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/input_model/",
-                "train_output_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/output_model/",
-                "train_output_metadata": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/output_metadata/",
-                "inference_input_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/input_model/",
-                "inference_output_labels": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/output_labels/",
-                "inference_output_metadata": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/output_metadata/",
+                "user_logs": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/user/logs/",
+                "raw_data": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/data/raw/",
+                "preprocessed_data": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/data/preprocessed/",
+                "annotate_tool": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/annotate/tool/",
+                "annotate_label": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/annotate/label/",
+                "train_input_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/input_model/",
+                "train_output_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/output_model/",
+                "train_output_metadata": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/output_metadata/",
+                "inference_input_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/input_model/",
+                "inference_output_labels": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/output_labels/",
+                "inference_output_metadata": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/output_metadata/",
             }
             
             return {
@@ -128,17 +129,17 @@ class S3Helper:
             logger.error(f"Error creating project folder structure: {str(e)}")
             # Return the URLs anyway, even if folder creation fails
             folder_structure = {
-                "user_logs": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/user/logs/",
-                "raw_data": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/data/raw/",
-                "preprocessed_data": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/data/preprocessed/",
-                "annotate_tool": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/annotate/tool/",
-                "annotate_label": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/annotate/label/",
-                "train_input_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/input_model/",
-                "train_output_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/output_model/",
-                "train_output_metadata": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/train/output_metadata/",
-                "inference_input_model": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/input_model/",
-                "inference_output_labels": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/output_labels/",
-                "inference_output_metadata": f"s3://{S3_DATA_BUCKET}/{tenant_id}/project/{project_id}/inference/output_metadata/",
+                "user_logs": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/user/logs/",
+                "raw_data": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/data/raw/",
+                "preprocessed_data": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/data/preprocessed/",
+                "annotate_tool": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/annotate/tool/",
+                "annotate_label": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/annotate/label/",
+                "train_input_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/input_model/",
+                "train_output_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/output_model/",
+                "train_output_metadata": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/train/output_metadata/",
+                "inference_input_model": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/input_model/",
+                "inference_output_labels": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/output_labels/",
+                "inference_output_metadata": f"s3://{S3_DATA_BUCKET}/accounts/{tenant_id}/project/{project_id}/inference/output_metadata/",
             }
             return {
                 "raw_data_url": S3Helper.generate_raw_data_url(tenant_id, project_id),
@@ -165,7 +166,7 @@ class S3Helper:
             return False
         
         try:
-            full_path = f"{tenant_id}/project/{project_id}/{folder_path}"
+            full_path = f"accounts/{tenant_id}/project/{project_id}/{folder_path}"
             
             # Check if object exists
             s3_client.client.head_object(Bucket=S3_DATA_BUCKET, Key=full_path)
@@ -198,7 +199,7 @@ class S3Helper:
             return []
         
         try:
-            full_path = f"{tenant_id}/project/{project_id}/{folder_path}"
+            full_path = f"accounts/{tenant_id}/project/{project_id}/{folder_path}"
             
             response = s3_client.client.list_objects_v2(
                 Bucket=S3_DATA_BUCKET,
@@ -239,7 +240,7 @@ class S3Helper:
             return False
         
         try:
-            base_path = f"{tenant_id}/project/{project_id}/"
+            base_path = f"accounts/{tenant_id}/project/{project_id}/"
             bucket = s3_client.resource.Bucket(S3_DATA_BUCKET)
             
             # Delete all objects with this prefix
@@ -283,7 +284,7 @@ class S3Helper:
             return None
         
         try:
-            full_key = f"{tenant_id}/project/{project_id}/{file_key}"
+            full_key = f"accounts/{tenant_id}/project/{project_id}/{file_key}"
             
             url = s3_client.client.generate_presigned_url(
                 'put_object',

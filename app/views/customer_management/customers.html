@@ -217,7 +217,23 @@
     payload.metadata = {};
     console.log(payload);
     fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-      .then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || (j.message || 'Request failed')); }).catch(function(){ throw new Error('Request failed'); }); return r.json(); })
+      .then(function(r){
+        if(!r.ok){
+          return r.json().then(function(j){
+            var msg = (j && (j.detail || j.message)) || '';
+            if (!msg && r.status === 400 && kind === 'user' && method === 'POST') {
+              msg = 'User with the same email already exists';
+            }
+            throw new Error(msg || 'Request failed');
+          }).catch(function(){
+            if (r.status === 400 && kind === 'user' && method === 'POST') {
+              throw new Error('User with the same email already exists');
+            }
+            throw new Error('Request failed');
+          });
+        }
+        return r.json();
+      })
       .then(function(){ closeModal('modal'); showToast('Saved', 'success'); reload(); })
       .catch(function(e){ showToast(e.message || 'Failed', 'error'); });
   }

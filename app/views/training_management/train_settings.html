@@ -74,6 +74,16 @@
         </select>
       </div>
     </div>
+    <div class="row">
+      <div class="field">
+        <label>Model Version</label>
+        <select id="model-version">
+          <option value="v1" selected>v1</option>
+          <option value="v2">v2</option>
+          <option value="v3">v3</option>
+        </select>
+      </div>
+    </div>
 
     <div class="row">
       <div class="field">
@@ -251,6 +261,7 @@
     projectSelect.disabled = true;
     document.getElementById('data-parser').value = 'RIEGL PARSER';
     document.getElementById('model-name').value = 'AMCNN';
+    var mv = document.getElementById('model-version'); if (mv) mv.value = 'v1';
     document.getElementById('initial-weights').checked = false;
   };
 
@@ -260,6 +271,7 @@
     var project_id = projectSelect.value;
     var data_parser = document.getElementById('data-parser').value;
     var model_name = document.getElementById('model-name').value;
+    var model_version = document.getElementById('model-version').value;
     var initial_weights = !!document.getElementById('initial-weights').checked;
 
     if (!name || !tenant_id || !project_id){
@@ -279,6 +291,7 @@
       name: name,
       tenant_id: tenant_id,
       project_id: project_id,
+      model_version: model_version,
       metadata: {
         data_parser: data_parser,
         model_name: model_name,
@@ -304,6 +317,8 @@
     var btn = document.getElementById('btn-start-train');
     if (spinner) spinner.classList.remove('hidden');
     if (btn) btn.disabled = true;
+    // Immediate feedback when training is initiated
+    showToast('Training started...', 'success');
     fetch('/train/' + encodeURIComponent(cfgId), { method: 'POST' })
       .then(function(r){
         if (r.status === 409) {
@@ -315,7 +330,7 @@
         if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || 'Failed to start training'); });
         return r.json();
       })
-      .then(function(data){ if(!data) return; showToast('Training started', 'success'); resetTrainForm(); })
+      .then(function(data){ if(!data) return; showToast('Training completed', 'success'); resetTrainForm(); })
       .catch(function(e){ showToast(e.message || 'Failed', 'error'); })
       .finally(function(){ if (spinner) spinner.classList.add('hidden'); if (btn) btn.disabled = !trainConfigSelect.value; });
   };
