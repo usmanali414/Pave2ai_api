@@ -1,0 +1,484 @@
+"""
+Preprocessor for RIEGL image and mask data - Implementation with json_to_masks functionality.
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2, os, json
+from PIL import ImageColor
+import argparse
+import pandas as pd
+import glob
+# Config will be passed from the orchestrator
+import time
+from typing import Tuple, Dict, Any, List
+from app.utils.logger_utils import logger
+import shutil
+from tqdm import tqdm as tq
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
+
+
+def check_dir_exists(inputPath, outPath):
+    if not os.path.exists(inputPath):
+        raise Exception("Error:  Input folder does not exist.")
+
+    #   if not os.path.exists(colorCodeFilePath):
+        # raise Exception("Error:  CSV file that contains color code doesn't exist")
+
+    if not os.path.exists( outPath ):
+        os.makedirs(outPath )
+
+
+class maskGenerate():
+
+    def __init__(self, combining_classes,classes_rgb):
+
+
+        self.class_to_rgb = dict()
+
+        for count in range(len(combining_classes)):
+            for combo in combining_classes[count]:
+                self.class_to_rgb[combo] = classes_rgb[count]
+    
+
+    def color_code_dict(self, csv_path):
+
+        df=pd.read_excel(csv_path)
+        return dict(zip(df.labelCode, df.colorCode))
+        # color_dict
+
+    def draw_poly(self, img, cordinates, colorCode):
+        pts = np.array(cordinates, np.int32).reshape((-1, 1, 2))
+        img=cv2.fillPoly(img, pts=[pts],  color=colorCode )
+
+        return img
+
+    def create_mask(self, data_2,imgshape):
+
+        mask = np.ones(imgshape) * 255
+        mask =  mask.astype('int32')
+        print(f"Available class mappings: {self.class_to_rgb}")
+        
+        for i in range(len(data_2)):
+            # print(i)
+            if data_2[i]['deleted']==True:
+                colors = [255,255,255]
+                print(f"Object {i}: deleted, using white")
+            else:
+                label = data_2[i]['label']
+                print(f"Object {i}: label='{label}'")
+                
+                if label not in self.class_to_rgb.keys():
+                    print(f"Label '{label}' not found in mappings, skipping")
+                    continue
+                    
+                colors = self.class_to_rgb[label]
+                print(f"Using colors: {colors}")
+
+            curr=data_2[i]['coordinates']
+            colorCode = [colors[2], colors[1], colors[0] ]
+
+            thickness = int(data_2[i]['thickness'])
+            if data_2[i]['type'] == 'Polygon':
+                print('drawing polygons')
+                mask = self.draw_poly(mask, curr, colorCode)
+
+            else:
+                print('drawing lines')
+                for k in range(len(curr)-1):
+                    mask = cv2.line(mask, pt1=tuple(curr[k]), pt2=tuple(curr[k+1]), color=colorCode,\
+                                     thickness= thickness )
+
+        return mask
+
+    def create_masks(self, inputPath, outPath,imgs_path):
+
+        jsonfiles = glob.glob(os.path.join(inputPath,'*.json'))
+        print('Total files found: ',len(jsonfiles))
+        for file in jsonfiles:
+
+            try:
+
+                if not file.endswith('.json'):
+                    raise Exception(f'The encountered file is not json: {file}')
+
+                file_name = os.path.split(file)[-1]
+
+                imgpath = os.path.join(imgs_path,file_name.replace('_mask.json', '.jpg'))
+                print(imgpath)
+                img = cv2.imread(imgpath)
+
+                file_object = open(file)
+                data = json.load(file_object)
+                data_2 =  data['lsfs']['99']['objects']
+                #print(file_path)
+                mask = self.create_mask(data_2,img.shape)
+                print(np.unique(mask,return_counts=True))
+                save_file_path = os.path.join(outPath, file_name.replace('json', 'png').replace('_mask', '') )
+                cv2.imwrite(save_file_path, mask)
+                    
+            except Exception as e:
+                print(e)
+                continue
+            
+
+def get_padding_dims(base_patch_size,tile_size,image_size ) -> ('top_padding','bottom_padding','left_padding','right_padding'):
+
+    '''
+    base_patch_size:    'Int' basic patch size(/ by 10) that we are going to extract to input in model
+    tile_size:          'Int' Tile size to calculate padding to extract tile of any specific size.
+    image_size:         'Tuple' (Height, Width) Image height, Image width
+    '''
+
+    if base_patch_size%10 != 0 :
+        raise Exception("Patch size is not divisible by 10..!!!")
+    if tile_size%2 != 0 :
+        raise Exception("Tile size is not divisible by 10..!!!")
+
+    # if tile_size == base_patch_size:
+    #   return (0,0,0,0)
+
+    left_padding =  int((tile_size/2)-(base_patch_size/2))
+    top_padding  =  int((tile_size/2)-(base_patch_size/2))
+
+
+    H,W = image_size[0],image_size[1]
+
+    if int(H%base_patch_size) == 0:
+        bottom_padding = int((tile_size/2) - (int(base_patch_size/2)))
+    else:
+        bottom_padding = int((tile_size/2) - ((H%base_patch_size)/2))
+    if int(W%base_patch_size) == 0:
+        right_padding =  int((tile_size/2) - (int(base_patch_size/2)))
+    else:
+        right_padding = int((tile_size/2) - ((W%base_patch_size)/2))
+
+    return top_padding,bottom_padding,left_padding,right_padding
+
+def get_tile(row_index,col_index,base_patch_size,tile_size,padded_img,padding_tuple,padded_check=True):
+    x = (row_index*base_patch_size)+(base_patch_size/2)
+    y = (col_index*base_patch_size)+(base_patch_size/2)
+
+    half_tile_size = int(tile_size/2)
+    if padded_check == True:
+        top,bottom,left,right = padding_tuple
+        y = y+top
+        x = x+left
+
+    #print(y-half_tile_size,y+half_tile_size,   x-half_tile_size,x+half_tile_size)
+    #print(padded_img.shape)
+    tile = padded_img[int(y-half_tile_size):int(y+half_tile_size), int(x-half_tile_size):int(x+half_tile_size), :]
+    return tile
+
+def get_no_rows_cols(img_shape,base_patch_size):
+    img_h_col,img_w_row = img_shape[0],img_shape[1]
+    no_of_rows = int(img_w_row/base_patch_size)
+    if int(img_w_row%base_patch_size)!=0:
+        no_of_rows = int(img_w_row/base_patch_size)+1
+    no_of_cols = int(img_h_col/base_patch_size)
+    if int(img_h_col%base_patch_size)!=0:
+        no_of_cols = int(img_h_col/base_patch_size)+1
+    return no_of_rows,no_of_cols
+
+'''Input parameters tile size list and image. Return images with additional reuired padding '''
+def get_padded_imgs(img,image_size):
+
+    tile_sizes = ConfigurationDict['tile_sizes']
+    #image_size = ConfigurationDict['image_size']
+    base_patch_size = ConfigurationDict['base_patch_size']
+    padded_imgs_list = []
+    padding_tuples_list = []
+    #calculating padded images for each tile size
+    for i in range(len(tile_sizes)):
+        tilesize = tile_sizes[i]
+        top, bottom, left, right = get_padding_dims(base_patch_size,tilesize,image_size)
+        padding_tuples = (top, bottom, left, right)
+        padding_tuples_list.append(padding_tuples)
+        #print(top, bottom, left, right)
+        padded_image = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT,0)
+        padded_imgs_list.append(padded_image)
+    return padded_imgs_list,padding_tuples_list
+
+'''Tiles of different sizes'''
+def get_tiles_of_all_sizes(row_index1,col_index1,padded_imgs_list,padding_tuples_list):
+    tile_sizes = ConfigurationDict['tile_sizes']
+    base_patch_size = ConfigurationDict['base_patch_size']
+    tiles_list = []
+    #print('padded imgslist length',len(padded_imgs_list))
+    for i in range(len(tile_sizes)):
+        tilesize = tile_sizes[i]
+        tile = get_tile(row_index1,col_index1,base_patch_size,tilesize,padded_imgs_list[i],padding_tuples_list[i],padded_check=True)
+        tile = cv2.resize(tile,(base_patch_size,base_patch_size))
+        #tile = np.expand_dims(tile,axis=0)
+        tiles_list.append(tile)
+
+    return tiles_list
+
+
+
+
+def get_mask_tile_class(mask, color_code):
+    # Convert color_code values to tuples if they are in string format
+    for key in color_code:
+        if isinstance(color_code[key], str):
+            color_code[key] = eval(color_code[key])
+
+    # Calculate unique colors and their counts
+    colors, counts = np.unique(mask.reshape(-1, 3), axis=0, return_counts=True)
+    colors = colors[:, ::-1]
+
+    # If there's only 1 color, return its class directly
+    if len(colors) == 1:
+
+        most_frequent_color = tuple(colors[0])
+        return next((key for key, value in color_code.items() if value == most_frequent_color), None)
+
+    if len(colors) > 2:
+        #print('more than 2 colors',colors)
+        # Exclude class 0 and 1 colors for the decision
+        excluded_indices = [i for i, color in enumerate(colors) if tuple(color) in [color_code['0'], color_code['1']]]
+        colors = np.delete(colors, excluded_indices, axis=0)
+        counts = np.delete(counts, excluded_indices)
+
+    if len(colors) == 0:
+
+        return '1'  # Return class 1 if only class 0 and 1 colors were present and now excluded
+
+    # Find the index of the most frequent color after exclusions
+    max_index = np.argmax(counts)
+    most_frequent_color = tuple(colors[max_index])
+
+    # Match the most frequent color with the color code dictionary and return its class
+    for key, value in color_code.items():
+        if value == most_frequent_color:
+            return key
+
+    # If no match found, return None
+            return None
+    
+
+def save_tiles(all_size_tiles,target_dir,classcode,counter):
+    classpath = os.path.join(target_dir,str(classcode))
+    os.makedirs(classpath,exist_ok=True)
+    filename = os.path.join(classpath,str(counter)+'_'+ConfigurationDict['datatype']+'.npz')
+    np.savez(filename, alltiles=all_size_tiles)
+
+# ... (rest of your code)
+def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+    # Perform the processing for a single tile
+    all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+    masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+    classcode = get_mask_tile_class(masktile, color_code)
+    save_tiles(all_size_tiles, target_dir, classcode, counter)
+
+def Save_image_patches_for_training(img_mappings, target_dir, color_code):
+
+    # ... (rest of your code)
+        #image_size = ConfigurationDict['image_size']
+    base_patch_size = ConfigurationDict['base_patch_size']
+
+    # if ConfigurationDict['same_size_images'] == True:
+    #     no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
+    #     #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
+    # def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+    #   # Perform the processing for a single tile
+    #   all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+    #   masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+    #   classcode = get_mask_tile_class(masktile, color_code)
+    #   save_tiles(all_size_tiles, target_dir, classcode, counter)
+
+    counter = np.int64(0)
+    cs_temp = 0
+    for img_name_iter in tq(range(len(img_mappings))):
+        starttime = time.time() 
+        img = cv2.imread(img_mappings[img_name_iter][0])
+        #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
+        # print(img_mappings[img_name_iter][0])
+        # print(img_mappings[img_name_iter][1])
+        mask = cv2.imread(img_mappings[img_name_iter][1])
+        #print("Image number: ",cs_temp)
+        cs_temp+=1
+        # print(img.shape)
+        # print(mask.shape)
+        #if ConfigurationDict['same_size_images'] == False:
+        image_size = img.shape[:2]
+        no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
+          #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
+
+        padded_imgs_list  ,  padding_tuples_list = get_padded_imgs(img,image_size)
+        
+        threads = []
+        with ThreadPoolExecutor() as executor:
+            '''Iterating over rows and cols tiles'''
+            for col_index1 in range(no_of_cols-1):
+                for row_index1 in range(no_of_rows-1):
+                    thread = executor.submit(process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
+                    threads.append(thread)
+                    counter += 1
+
+        # Optionally wait for all tasks to complete and handle results/errors
+        for future in as_completed(threads):
+            try:
+                result = future.result()  # You could return something useful here
+            except Exception as e:
+                print(f"An error occurred: {e}")
+        #print("time: ",time.time()-starttime )
+
+
+
+
+class RIEGLPreprocessor:
+    """Preprocessor for RIEGL image and mask data with json_to_masks functionality."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        logger.info("RIEGLPreprocessor.__init__() method called - preprocessor initialized")
+        self.config = config
+        
+        # Initialize global ConfigurationDict for masks_to_patches functionality
+        global ConfigurationDict
+        config_obj = AMCNN_V1_CONFIG()
+        
+        # Initialize mask generator with config
+        # Use the values from the config and add missing label
+        combining_classes = config_obj.combining_classes.copy()
+        # Add the missing label that appears in the JSON files
+        combining_classes.append(['conc-msk-long-ltrt'])
+        classes_rgb = list(config_obj.classes_rgb)
+        classes_rgb.append((255, 255, 255))  # White for conc-msk-long-ltrt
+        self.mask_generator = maskGenerate(combining_classes, classes_rgb)
+        ConfigurationDict = {
+            'image_size': config_obj.image_size,
+            'base_patch_size': config_obj.base_patch_size,
+            'tile_sizes': config_obj.tile_sizes,
+            'same_size_images': config_obj.same_size_images,
+            'mask_extension': config_obj.mask_extension,
+            'datatype': config_obj.datatype
+        }
+        
+        # Initialize color mappings for patches
+        self.class_to_code = config_obj.class_to_code
+        self.color_code = config_obj.color_code
+    
+    def preprocess_images_and_annotations(self, image_annotation_pairs: List[Tuple[str, str]], project_id: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        """
+        Preprocess images and generate masks from annotations using json_to_masks and masks_to_patches functionality.
+        
+        Args:
+            image_annotation_pairs: List of (image_path, annotation_path) tuples
+            project_id: Project ID for organizing output files
+            
+        Returns:
+            Tuple of (processed_images, generated_masks)
+        """
+        logger.info(f"RIEGLPreprocessor.preprocess_images_and_annotations() method called")
+        logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs for project: {project_id}")
+        
+        # Extract paths from the first pair to determine directory structure
+        if image_annotation_pairs:
+            first_image_path = image_annotation_pairs[0][0]
+            first_json_path = image_annotation_pairs[0][1]
+            
+            # Determine dataset path (parent directory containing jsons and orig_images)
+            dataset_path = os.path.dirname(os.path.dirname(first_json_path))
+            
+            outputpath = os.path.join(dataset_path,'masks')
+            json_folder_path = os.path.join(dataset_path,'jsons')
+            orig_imgs_path = os.path.join(dataset_path,'orig_images')
+            split_data_path = os.path.join(dataset_path,'split_patches_data')
+            
+            logger.info(f"Dataset path: {dataset_path}")
+            logger.info(f"JSON folder path: {json_folder_path}")
+            logger.info(f"Original images path: {orig_imgs_path}")
+            logger.info(f"Output masks path: {outputpath}")
+            logger.info(f"Split patches data path: {split_data_path}")
+            
+            # Step 1: Check directories and create masks
+            check_dir_exists(json_folder_path, outputpath)
+            
+            # Start time measurement
+            start_time = time.time()
+            
+            # Step 2: Generate masks using the mask generator
+            self.mask_generator.create_masks(json_folder_path, outputpath, orig_imgs_path)
+            
+            mask_generation_time = time.time() - start_time
+            logger.info(f"Mask generation completed in {mask_generation_time} seconds")
+            
+            # Step 3: Generate patches from masks (masks_to_patches functionality)
+            patch_start_time = time.time()
+            
+            # Setup split patches data directory
+            if os.path.exists(split_data_path):
+                shutil.rmtree(split_data_path)
+            os.makedirs(split_data_path)
+            
+            # Create subdirectories for train/test/val splits
+            data_subsets = ['train','test','val']
+            classes_code = ['0','1','2','3','4']
+            
+            for subset_iter in data_subsets:
+                subset_path = os.path.join(split_data_path, subset_iter)
+                if not os.path.exists(subset_path):
+                    os.makedirs(subset_path)
+                
+                for class_iter in classes_code:
+                    class_path = os.path.join(subset_path, class_iter)
+                    if not os.path.exists(class_path):
+                        os.makedirs(class_path)
+            
+            # Prepare image-mask mappings
+            images_list = glob.glob(os.path.join(orig_imgs_path,"*"))
+            splitimgslist = [os.path.split(i)[1].split('.')[0] for i in images_list]
+            
+            # Only include mappings where both image and mask exist
+            img_mask_mappings = []
+            for i, img_name in enumerate(splitimgslist):
+                img_path = images_list[i]
+                mask_path = os.path.join(outputpath, img_name + ConfigurationDict['mask_extension'])
+                
+                if os.path.exists(img_path) and os.path.exists(mask_path):
+                    img_mask_mappings.append((img_path, mask_path))
+                    logger.info(f"Added mapping: {img_name}")
+            else:
+                    logger.warning(f"Missing files for {img_name}: img={os.path.exists(img_path)}, mask={os.path.exists(mask_path)}")
+            
+            logger.info(f"Total valid image-mask pairs: {len(img_mask_mappings)}")
+            
+            # Split data into train/val/test
+            train_cut = int(len(img_mask_mappings)*0.65)
+            val_cut = int(len(img_mask_mappings)*0.15)
+            train_mappings = img_mask_mappings[:train_cut]
+            val_mappings = img_mask_mappings[train_cut:train_cut+val_cut]
+            test_mappings = img_mask_mappings[train_cut+val_cut:]
+            
+            logger.info(f'Train Samples: {len(train_mappings)}')
+            logger.info(f'Val Samples: {len(val_mappings)}')
+            logger.info(f'Test Samples: {len(test_mappings)}')
+            
+            # Generate patches for each split
+            target_dir = os.path.join(split_data_path,'train')
+            Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
+            
+            target_dir = os.path.join(split_data_path,'val')
+            Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
+            
+            target_dir = os.path.join(split_data_path,'test')
+            Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
+            
+            patch_generation_time = time.time() - patch_start_time
+            logger.info(f"Patch generation completed in {patch_generation_time} seconds")
+            
+            # Calculate total time
+            total_time = time.time() - start_time
+            logger.info(f"Total preprocessing completed in {total_time} seconds")
+            
+            # Return dummy data for training pipeline (since actual images/masks/patches are saved to disk)
+            dummy_images = [np.random.rand(224, 224, 3) for _ in range(len(image_annotation_pairs))]
+            dummy_masks = [np.random.rand(224, 224, 1) for _ in range(len(image_annotation_pairs))]
+            
+            logger.info("Preprocessing completed successfully - masks and patches generated")
+            return dummy_images, dummy_masks
+        else:
+            logger.warning("No image-annotation pairs provided")
+            return [], []
