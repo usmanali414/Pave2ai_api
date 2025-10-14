@@ -1,19 +1,23 @@
-from app.services.s3.s3_operations import s3_operations
-from pathlib import Path
 import os
+import sys
+from pathlib import Path
 
+# Add the project root to Python path BEFORE importing app modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.services.s3.s3_operations import s3_operations
 # Configuration: List of upload mappings
 UPLOAD_CONFIGS = [
     {
         "name": "Images",
         "local_path": "E:\Pave2ai_api\static\dataset\orig_images",
-        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68dca627a340f24038389ad5/data/preprocessed/",
+        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68eea23195a8fa5386b39e05/data/preprocessed/",
         "file_extension": "*.jpg"
     },
     {
         "name": "JSON Annotations",
         "local_path": "E:\Pave2ai_api\static\dataset\jsons",
-        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68dca627a340f24038389ad5/annotate/label/",
+        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68eea23195a8fa5386b39e05/annotate/label/",
         "file_extension": "*.json"
     }
 ]

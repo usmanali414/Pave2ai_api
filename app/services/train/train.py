@@ -75,9 +75,11 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
         "ended_at": None,
         "step_status": {
             "loading_data": None,
+            "preprocessing": None,
             "training": None,
             "saving_model": None
-        }
+        },
+        "model_logs_path": None
     }
     result = await train_runs.insert_one(run_doc)
     run_id = str(result.inserted_id)
@@ -185,6 +187,7 @@ async def get_training_status(train_run_id: str) -> Dict[str, Any]:
             "train_config_id": run["train_config_id"],
             "status": run["status"],
             "step_status": run.get("step_status", {}),
+            "model_logs_path": run.get("model_logs_path"),
             "created_at": run["created_at"],
             "updated_at": run["updated_at"],
             "ended_at": run.get("ended_at"),

@@ -233,10 +233,12 @@ async def ensure_collections_and_indexes() -> None:
                         "bsonType": ["object", "null"],
                         "properties": {
                             "loading_data": {"bsonType": ["string", "null"]},
+                            "preprocessing": {"bsonType": ["string", "null"]},
                             "training": {"bsonType": ["string", "null"]},
                             "saving_model": {"bsonType": ["string", "null"]}
                         }
                     },
+                    "model_logs_path": {"bsonType": ["string", "null"]},
                     "results": {"bsonType": ["object", "null"]},
                     "error": {"bsonType": ["string", "null"]}
                 },

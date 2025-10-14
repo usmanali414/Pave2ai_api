@@ -8,7 +8,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
-
+from bson import ObjectId
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -45,15 +45,13 @@ class AMCNNOrchestrator:
             # Set train_run_id for status updates
             self.train_run_id = train_run_id
             
-            # Step 1: Load and validate train configuration
-            await self._update_train_run_status("loading_data", "started")
+            await self._update_train_run_status(train_run_id, "loading_data", "in_progress")
             self.train_config = await self._load_train_config(train_config_id)
             
             # Step 2: Load bucket configuration
             self.bucket_config = await self._load_bucket_config(self.train_config["project_id"])
             
             # Step 3: Load components dynamically based on train_config
-            await self._update_train_run_status("loading_data", "in_progress")
             components = await self._load_training_components(self.train_config)
             self.data_parser = components["data_parser"]
             self.model = components["model"]
@@ -64,17 +62,17 @@ class AMCNNOrchestrator:
             
             if not self.data_parser.validate_data(transferred_data):
                 raise ValueError("Data validation failed")
+
+            await self._update_train_run_status(train_run_id, "loading_data", "completed")
             
             # Step 5: Initialize and run AMCNN preprocessor based on model version
+            await self._update_train_run_status(train_run_id, "preprocessing", "in_progress")
             model_version = self.train_config.get("model_version", "v1")
             X, y = await self._run_amcnn_preprocessor(transferred_data, model_version)
-            await self._update_train_run_status("loading_data", "completed")
-            
-            # Step 6: Initialize model
-            await self._update_train_run_status("training", "started")
+            await self._update_train_run_status(train_run_id, "preprocessing", "completed")
             
             # Step 7: Train model
-            await self._update_train_run_status("training", "in_progress")
+            await self._update_train_run_status(train_run_id, "training", "in_progress")
             
             # Prepare training config with dataset path and initial weights info
             training_config = self.train_config.get("metadata", {})
@@ -89,20 +87,27 @@ class AMCNNOrchestrator:
                 training_config["initial_weights_path"] = self._get_initial_weights_path()
             
             training_results = self.model.train(X, y, training_config)
+            if training_results:
+                await self._update_train_run_status(train_run_id, "training", "completed")
+                
+                # Update model logs path if available
+                model_logs_path = training_results.get("model_logs_path")
+                if model_logs_path:
+                    await self._update_model_logs_path(train_run_id, model_logs_path)
+            else:
+                await self._update_train_run_status(train_run_id, "training", "failed")
+                raise RuntimeError("Failed to train model")
             
             # Step 8: Save model weights
-            await self._update_train_run_status("saving_model", "started")
+            await self._update_train_run_status(train_run_id, "saving_model", "in_progress")
             weights_path = self._get_weights_output_path()
             weights_saved = self.model.save_weights(weights_path)
             
             if not weights_saved:
+                await self._update_train_run_status(train_run_id, "saving_model", "failed")
                 raise RuntimeError("Failed to save model weights")
-            
-            await self._update_train_run_status("saving_model", "completed")
-            await self._update_train_run_status("training", "completed")
-            
-            # Step 9: Update final status
-            await self._update_train_run_final_status("completed")
+            else:
+                await self._update_train_run_status(train_run_id, "saving_model", "completed")
             
             logger.info("AMCNN training pipeline completed successfully")
             
@@ -113,7 +118,7 @@ class AMCNNOrchestrator:
             
         except Exception as e:
             logger.error(f"Error in AMCNN training pipeline: {str(e)}")
-            await self._update_train_run_final_status("failed")
+            await self._update_train_run_final_status(train_run_id, "failed")
             raise
     
     async def _load_train_config(self, train_config_id: str) -> Dict[str, Any]:
@@ -122,7 +127,6 @@ class AMCNNOrchestrator:
             db = mongo_client.database
             train_configs = db[database_config["TRAIN_CONFIG_COLLECTION"]]
             
-            from bson import ObjectId
             config = await train_configs.find_one({"_id": ObjectId(train_config_id)})
             
             if not config:
@@ -272,27 +276,27 @@ class AMCNNOrchestrator:
                 preprocessor_class_name = f"{parser_name.replace('_PARSER', 'Preprocessor')}"
                 preprocessor_class = getattr(preprocessor_module, preprocessor_class_name)
                 
-                # Import config using exact parser name
-                parser_config_module_path = f"app.deep_models.data_parser.{parser_name}.config"
-                parser_config_module = importlib.import_module(parser_config_module_path)
-                parser_config = getattr(parser_config_module, f"{parser_name}_CONFIG")
+                # # Import config using exact parser name
+                # parser_config_module_path = f"app.deep_models.data_parser.{parser_name}.config"
+                # parser_config_module = importlib.import_module(parser_config_module_path)
+                # parser_config = getattr(parser_config_module, f"{parser_name}_CONFIG")
                 
                 # Initialize preprocessor with config
-                preprocessor = preprocessor_class(parser_config)
+                preprocessor = preprocessor_class()
                 
                 # Get local file paths from transferred data
                 image_paths = transferred_data["image_paths"]
                 annotation_paths = transferred_data["annotation_paths"]
                 project_id = transferred_data["project_id"]
                 
-                # Create image-annotation pairs
-                image_annotation_pairs = list(zip(image_paths, annotation_paths))
+                # # Create image-annotation pairs
+                # image_annotation_pairs = list(zip(image_paths, annotation_paths))
                 
-                logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs")
+                # logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs")
                 
                 # Run preprocessing (assuming the method is called preprocess_images_and_annotations)
                 processed_images, generated_masks = preprocessor.preprocess_images_and_annotations(
-                    image_annotation_pairs, project_id
+                    image_paths, annotation_paths, project_id
                 )
                 
                 # Convert to numpy arrays for training
@@ -417,10 +421,10 @@ class AMCNNOrchestrator:
             logger.error(f"Failed to load {component_type} {component_name}: {str(e)}")
             raise ValueError(f"Unsupported {component_type}: {component_name}. Error: {str(e)}")
     
-    async def _update_train_run_status(self, step: str, status: str):
+    async def _update_train_run_status(self, train_run_id: str, step: str, status: str):
         """Update train run status for a specific step."""
         try:
-            if not self.train_run_id:
+            if not train_run_id:
                 logger.warning("No train_run_id available for status update")
                 return
             
@@ -428,8 +432,7 @@ class AMCNNOrchestrator:
             train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
             
             # Convert string train_run_id to ObjectId
-            from bson import ObjectId
-            run_id = ObjectId(self.train_run_id)
+            run_id = ObjectId(train_run_id)
             
             # Update step_status
             update_data = {
@@ -447,10 +450,10 @@ class AMCNNOrchestrator:
         except Exception as e:
             logger.error(f"Error updating train run status: {str(e)}")
     
-    async def _update_train_run_final_status(self, final_status: str):
+    async def _update_train_run_final_status(self, train_run_id: str, final_status: str):
         """Update final train run status."""
         try:
-            if not self.train_run_id:
+            if not train_run_id:
                 logger.warning("No train_run_id available for final status update")
                 return
             
@@ -458,8 +461,7 @@ class AMCNNOrchestrator:
             train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
             
             # Convert string train_run_id to ObjectId
-            from bson import ObjectId
-            run_id = ObjectId(self.train_run_id)
+            run_id = ObjectId(train_run_id)
             
             update_data = {
                 "status": final_status,
@@ -476,6 +478,35 @@ class AMCNNOrchestrator:
             
         except Exception as e:
             logger.error(f"Error updating final train run status: {str(e)}")
+    
+    async def _update_model_logs_path(self, train_run_id: str, logs_path: str):
+        """Update model logs path for a training run."""
+        try:
+            if not train_run_id:
+                logger.warning("No train_run_id available for logs path update")
+                return
+            
+            db = mongo_client.database
+            train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            
+            # Convert string train_run_id to ObjectId
+            run_id = ObjectId(train_run_id)
+            
+            # Update model_logs_path
+            update_data = {
+                "model_logs_path": logs_path,
+                "updated_at": datetime.utcnow()
+            }
+            
+            await train_runs.update_one(
+                {"_id": run_id},
+                {"$set": update_data}
+            )
+            
+            logger.info(f"Updated model logs path: {logs_path}")
+            
+        except Exception as e:
+            logger.error(f"Error updating model logs path: {str(e)}")
     
     def _get_dataset_path(self) -> str:
         """Get the dataset path where patches are stored."""

@@ -10,6 +10,7 @@ from app.controllers.v1.model_config.model_config import router as model_config_
 from app.controllers.v1.tenant_management.tenant import router as tenant_router
 from app.controllers.v1.auth.auth import router as auth_router
 from app.controllers.v1.project_management.project import router as project_router
+from app.controllers.v1.project_deletion.project_deletion import router as project_deletion_router
 from app.controllers.v1.admin.admin import router as admin_router
 from app.controllers.v1.train.train import router as train_router
 from app.controllers.v1.train_config.train_config import router as train_config_router
@@ -57,6 +58,7 @@ app.include_router(bucket_config_router, tags=["Bucket Config"])
 app.include_router(dataset_config_router, tags=["Dataset Config"])
 app.include_router(model_config_router, tags=["Model Config"])
 app.include_router(project_router, tags=["Project"])
+app.include_router(project_deletion_router, tags=["Project Deletion"])
 app.include_router(admin_router, tags=["Admin"])
 app.include_router(train_router, tags=["Train"])
 app.include_router(train_config_router, tags=["Train Config"])

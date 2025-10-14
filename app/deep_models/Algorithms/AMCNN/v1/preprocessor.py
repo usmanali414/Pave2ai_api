@@ -58,23 +58,18 @@ class maskGenerate():
 
         mask = np.ones(imgshape) * 255
         mask =  mask.astype('int32')
-        print(f"Available class mappings: {self.class_to_rgb}")
-        
         for i in range(len(data_2)):
             # print(i)
             if data_2[i]['deleted']==True:
                 colors = [255,255,255]
-                print(f"Object {i}: deleted, using white")
             else:
-                label = data_2[i]['label']
-                print(f"Object {i}: label='{label}'")
-                
-                if label not in self.class_to_rgb.keys():
-                    print(f"Label '{label}' not found in mappings, skipping")
+                if data_2[i]['label'] not in self.class_to_rgb.keys():
+
+                    #print(data_2[i]['doughCode'],' not in ',self.class_to_rgb.keys())
                     continue
-                    
-                colors = self.class_to_rgb[label]
-                print(f"Using colors: {colors}")
+
+                colors = self.class_to_rgb[ data_2[i]['label'] ]
+                # colors = ImageColor.getcolor('#'+str(colors), "RGB")
 
             curr=data_2[i]['coordinates']
             colorCode = [colors[2], colors[1], colors[0] ]
@@ -117,7 +112,7 @@ class maskGenerate():
                 print(np.unique(mask,return_counts=True))
                 save_file_path = os.path.join(outPath, file_name.replace('json', 'png').replace('_mask', '') )
                 cv2.imwrite(save_file_path, mask)
-                    
+
             except Exception as e:
                 print(e)
                 continue
@@ -331,9 +326,8 @@ def Save_image_patches_for_training(img_mappings, target_dir, color_code):
 class RIEGLPreprocessor:
     """Preprocessor for RIEGL image and mask data with json_to_masks functionality."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self):
         logger.info("RIEGLPreprocessor.__init__() method called - preprocessor initialized")
-        self.config = config
         
         # Initialize global ConfigurationDict for masks_to_patches functionality
         global ConfigurationDict
@@ -341,11 +335,8 @@ class RIEGLPreprocessor:
         
         # Initialize mask generator with config
         # Use the values from the config and add missing label
-        combining_classes = config_obj.combining_classes.copy()
-        # Add the missing label that appears in the JSON files
-        combining_classes.append(['conc-msk-long-ltrt'])
-        classes_rgb = list(config_obj.classes_rgb)
-        classes_rgb.append((255, 255, 255))  # White for conc-msk-long-ltrt
+        combining_classes = config_obj.combining_classes
+        classes_rgb = config_obj.classes_rgb
         self.mask_generator = maskGenerate(combining_classes, classes_rgb)
         ConfigurationDict = {
             'image_size': config_obj.image_size,
@@ -360,24 +351,25 @@ class RIEGLPreprocessor:
         self.class_to_code = config_obj.class_to_code
         self.color_code = config_obj.color_code
     
-    def preprocess_images_and_annotations(self, image_annotation_pairs: List[Tuple[str, str]], project_id: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    def preprocess_images_and_annotations(self, image_paths: List[str], annotation_paths: List[str], project_id: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """
         Preprocess images and generate masks from annotations using json_to_masks and masks_to_patches functionality.
         
         Args:
-            image_annotation_pairs: List of (image_path, annotation_path) tuples
+            image_paths: List of image file paths
+            annotation_paths: List of annotation file paths
             project_id: Project ID for organizing output files
             
         Returns:
             Tuple of (processed_images, generated_masks)
         """
         logger.info(f"RIEGLPreprocessor.preprocess_images_and_annotations() method called")
-        logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs for project: {project_id}")
+        logger.info(f"Processing {len(image_paths)} image-annotation pairs for project: {project_id}")
         
         # Extract paths from the first pair to determine directory structure
-        if image_annotation_pairs:
-            first_image_path = image_annotation_pairs[0][0]
-            first_json_path = image_annotation_pairs[0][1]
+        if image_paths and annotation_paths:
+            first_image_path = image_paths[0]
+            first_json_path = annotation_paths[0]
             
             # Determine dataset path (parent directory containing jsons and orig_images)
             dataset_path = os.path.dirname(os.path.dirname(first_json_path))
@@ -417,40 +409,28 @@ class RIEGLPreprocessor:
             data_subsets = ['train','test','val']
             classes_code = ['0','1','2','3','4']
             
+            data_subsets = ['train','test','val']
+            classes_code = ['0','1','2','3','4']
+
             for subset_iter in data_subsets:
-                subset_path = os.path.join(split_data_path, subset_iter)
-                if not os.path.exists(subset_path):
-                    os.makedirs(subset_path)
-                
                 for class_iter in classes_code:
-                    class_path = os.path.join(subset_path, class_iter)
-                    if not os.path.exists(class_path):
-                        os.makedirs(class_path)
+                    path1 = os.path.join(split_data_path,subset_iter)
+                    if not os.path.exists(path1):
+                        os.makedirs(path1)
             
-            # Prepare image-mask mappings
             images_list = glob.glob(os.path.join(orig_imgs_path,"*"))
+            #masks_list = glob.glob(os.path.join(raw_masks_path,"*"))
             splitimgslist = [os.path.split(i)[1].split('.')[0] for i in images_list]
-            
-            # Only include mappings where both image and mask exist
-            img_mask_mappings = []
-            for i, img_name in enumerate(splitimgslist):
-                img_path = images_list[i]
-                mask_path = os.path.join(outputpath, img_name + ConfigurationDict['mask_extension'])
-                
-                if os.path.exists(img_path) and os.path.exists(mask_path):
-                    img_mask_mappings.append((img_path, mask_path))
-                    logger.info(f"Added mapping: {img_name}")
-            else:
-                    logger.warning(f"Missing files for {img_name}: img={os.path.exists(img_path)}, mask={os.path.exists(mask_path)}")
+            masks_list = [os.path.join(outputpath,i+ConfigurationDict['mask_extension']) for i in splitimgslist]
+            img_mask_mappings = list(zip(images_list, masks_list))
+            train_cut = int(len(img_mask_mappings)*0.50)
+            val_cut = int(len(img_mask_mappings)*0.25)
+            train_mappings = img_mask_mappings[:train_cut]
+            val_mappings = img_mask_mappings[train_cut:train_cut+val_cut]   
+            test_mappings = img_mask_mappings[train_cut+val_cut:]
+            # test_mappings = img_mask_mappings[train_cut+val_cut:]
             
             logger.info(f"Total valid image-mask pairs: {len(img_mask_mappings)}")
-            
-            # Split data into train/val/test
-            train_cut = int(len(img_mask_mappings)*0.65)
-            val_cut = int(len(img_mask_mappings)*0.15)
-            train_mappings = img_mask_mappings[:train_cut]
-            val_mappings = img_mask_mappings[train_cut:train_cut+val_cut]
-            test_mappings = img_mask_mappings[train_cut+val_cut:]
             
             logger.info(f'Train Samples: {len(train_mappings)}')
             logger.info(f'Val Samples: {len(val_mappings)}')
@@ -474,11 +454,11 @@ class RIEGLPreprocessor:
             logger.info(f"Total preprocessing completed in {total_time} seconds")
             
             # Return dummy data for training pipeline (since actual images/masks/patches are saved to disk)
-            dummy_images = [np.random.rand(224, 224, 3) for _ in range(len(image_annotation_pairs))]
-            dummy_masks = [np.random.rand(224, 224, 1) for _ in range(len(image_annotation_pairs))]
+            dummy_images = [np.random.rand(224, 224, 3) for _ in range(len(image_paths))]
+            dummy_masks = [np.random.rand(224, 224, 1) for _ in range(len(image_paths))]
             
             logger.info("Preprocessing completed successfully - masks and patches generated")
             return dummy_images, dummy_masks
         else:
-            logger.warning("No image-annotation pairs provided")
+            logger.warning("No image-annotation paths provided")
             return [], []

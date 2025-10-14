@@ -30,9 +30,6 @@ from app.deep_models.Algorithms.AMCNN.v1.model import modelMCNN
 from app.deep_models.Algorithms.AMCNN.v1.data_generators import DataGen
 from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-
 class AMCNN(Model):
     """AMCNN v1 model implementation for point cloud classification."""
     
@@ -177,6 +174,7 @@ class AMCNN(Model):
             return {
                 "status": "completed",
                 "message": "AMCNN training completed successfully",
+                "model_logs_path": getattr(self, 's3_logs_path', None),
                 "metrics": {
                     "training_time": total_time,
                     "final_loss": self.training_history.history['loss'][-1],
@@ -220,9 +218,46 @@ class AMCNN(Model):
         Returns:
             True if successful, False otherwise
         """
-        logger.info(f"AMCNN.save_weights() method called - saving to: {weights_path}")
-        logger.info("Model weights saved successfully")
-        return True
+        try:
+            logger.info(f"AMCNN.save_weights() method called - saving to: {weights_path}")
+            
+            if self.model is None:
+                logger.error("Model not initialized, cannot save weights")
+                return False
+            
+            # Create local temp directory for weights
+            local_temp_dir = os.path.join(os.getcwd(), 'temp_final_weights')
+            os.makedirs(local_temp_dir, exist_ok=True)
+            
+            # Extract filename from S3 path
+            weights_filename = os.path.basename(weights_path)
+            local_weights_path = os.path.join(local_temp_dir, weights_filename)
+            
+            # Save model weights locally first
+            self.model.save_weights(local_weights_path)
+            logger.info(f"Saved trained model weights locally: {local_weights_path}")
+            
+            # Upload to S3
+            upload_result = self.s3_operations.upload_file(local_weights_path, weights_path)
+            
+            if upload_result:
+                logger.info(f"Successfully uploaded trained model weights to S3: {weights_path}")
+                
+                # Clean up local temp directory
+                import shutil
+                shutil.rmtree(local_temp_dir)
+                return True
+            else:
+                logger.error(f"Failed to upload trained model weights to S3: {weights_path}")
+                
+                # Clean up local temp directory
+                import shutil
+                shutil.rmtree(local_temp_dir)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error saving trained model weights: {str(e)}")
+            return False
     
     def load_weights(self, weights_path: str) -> bool:
         """
@@ -430,11 +465,17 @@ class AMCNN(Model):
             logger.info(f"Loading weights from S3: {weights_path}")
             
             # List files in the S3 path to find .h5 files
-            s3_files = self.s3_operations.list_files(weights_path)
-            logger.info(f"Found {len(s3_files)} files in S3: {s3_files}")
+            s3_result = self.s3_operations.list_files(weights_path)
+            logger.info(f"Found {len(s3_result)} files in S3: {s3_result}")
+            
+            if not s3_result["success"]:
+                logger.error(f"Failed to list files in S3: {s3_result.get('error', 'Unknown error')}")
+                return False
+            
+            s3_files = s3_result["files"]
             
             # Check for .h5 files (case insensitive)
-            h5_files = [f for f in s3_files if f.lower().endswith('.h5')]
+            h5_files = [f["key"] for f in s3_files if f["key"].lower().endswith('.h5')]
             logger.info(f"Filtered {len(h5_files)} .h5 files: {h5_files}")
             
             # If no .h5 files, try to find any weight files
@@ -443,7 +484,7 @@ class AMCNN(Model):
                 weight_extensions = ['.h5', '.hdf5', '.weights', '.ckpt', '.pth', '.pt']
                 weight_files = []
                 for ext in weight_extensions:
-                    files_with_ext = [f for f in s3_files if f.lower().endswith(ext)]
+                    files_with_ext = [f["key"] for f in s3_files if f["key"].lower().endswith(ext)]
                     weight_files.extend(files_with_ext)
                 
                 if weight_files:
@@ -451,33 +492,66 @@ class AMCNN(Model):
                     h5_files = weight_files  # Use the first weight file found
                 else:
                     logger.warning(f"No weight files found in S3 path: {weights_path}")
-                    logger.warning(f"Available files: {s3_files}")
-                    return False
+                    logger.info("Creating new initial weights file...")
+                    
+                    # Create new initial weights file
+                    initial_weights_filename = "dummy_model_weights.h5"
+                    success = self._create_and_save_initial_weights(initial_weights_filename, weights_path)
+                    if success:
+                        logger.info(f"Successfully created new initial weights: {initial_weights_filename}")
+                        return True
+                    else:
+                        logger.error("Failed to create new initial weights")
+                        return False
             
             # Use the first .h5 file found (or you can implement logic to select specific file)
-            weights_file = h5_files[0]
-            full_s3_path = f"{weights_path.rstrip('/')}/{weights_file}"
+            weights_file_key = h5_files[0]  # Full S3 key
+            weights_file_name = os.path.basename(weights_file_key)  # Just the filename
+            full_s3_path = f"{weights_path.rstrip('/')}/{weights_file_name}"
             
             # Download weights file to local temp directory
             local_temp_dir = os.path.join(os.getcwd(), 'temp_weights')
             os.makedirs(local_temp_dir, exist_ok=True)
-            local_weights_path = os.path.join(local_temp_dir, weights_file)
+            # Use the filename we already extracted
+            local_weights_path = os.path.join(local_temp_dir, weights_file_name)
             
             # Download from S3
-            success = self.s3_operations.download_file(full_s3_path, local_weights_path)
-            if not success:
-                logger.error(f"Failed to download weights from S3: {full_s3_path}")
+            download_result = self.s3_operations.download_file(full_s3_path, local_weights_path)
+            if not download_result["success"]:
+                logger.error(f"Failed to download weights from S3: {full_s3_path} - {download_result.get('error', 'Unknown error')}")
                 return False
             
             # Load weights into the model
             if self.model is not None:
-                self.model.load_weights(local_weights_path)
-                logger.info(f"Successfully loaded weights from: {full_s3_path}")
-                
-                # Clean up local temp file
-                import shutil
-                shutil.rmtree(local_temp_dir)
-                return True
+                try:
+                    self.model.load_weights(local_weights_path)
+                    logger.info(f"Successfully loaded weights from: {full_s3_path}")
+                    
+                    # Clean up local temp file
+                    import shutil
+                    shutil.rmtree(local_temp_dir)
+                    return True
+                    
+                except Exception as load_error:
+                    logger.warning(f"Architecture mismatch when loading weights: {str(load_error)}")
+                    logger.info("Creating new initial weights with correct architecture...")
+                    
+                    # Create and save new initial weights with correct architecture
+                    success = self._create_and_save_initial_weights(weights_file_name, weights_path)
+                    if success:
+                        logger.info("Successfully created and saved new initial weights with correct architecture")
+                        
+                        # Clean up local temp file
+                        import shutil
+                        shutil.rmtree(local_temp_dir)
+                        return True
+                    else:
+                        logger.error("Failed to create new initial weights")
+                        
+                        # Clean up local temp file
+                        import shutil
+                        shutil.rmtree(local_temp_dir)
+                        return False
             else:
                 logger.error("Model not initialized, cannot load weights")
                 return False
@@ -486,7 +560,7 @@ class AMCNN(Model):
             logger.error(f"Error loading weights from S3: {str(e)}")
             return False
     
-    def _create_and_save_initial_weights(self, config: Dict[str, Any]) -> bool:
+    def _create_and_save_initial_weights(self, target_filename: str, s3_base_path: str) -> bool:
         """Create and save initial weights to S3."""
         try:
             logger.info("Creating and saving initial weights to S3")
@@ -499,23 +573,16 @@ class AMCNN(Model):
             local_temp_dir = os.path.join(os.getcwd(), 'temp_initial_weights')
             os.makedirs(local_temp_dir, exist_ok=True)
             
-            # Generate initial weights filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            initial_weights_filename = f"initial_weights_{timestamp}.h5"
+            # Use target filename
+            initial_weights_filename = target_filename
             local_weights_path = os.path.join(local_temp_dir, initial_weights_filename)
             
             # Save model weights locally first
             self.model.save_weights(local_weights_path)
             logger.info(f"Saved initial weights locally: {local_weights_path}")
             
-            # Upload to S3 train_input_model folder
-            # Get the train_input_model path from config (passed from orchestrator)
-            initial_weights_s3_path = config.get('initial_weights_path', '')
-            if not initial_weights_s3_path:
-                logger.error("No initial weights S3 path provided in config")
-                return False
-            
-            full_s3_path = f"{initial_weights_s3_path.rstrip('/')}/{initial_weights_filename}"
+            # Upload to S3 using the provided S3 base path
+            full_s3_path = f"{s3_base_path.rstrip('/')}/{initial_weights_filename}"
             success = self.s3_operations.upload_file(local_weights_path, full_s3_path)
             
             if success:
