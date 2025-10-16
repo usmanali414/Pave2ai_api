@@ -22,7 +22,7 @@ class RIEGL_PARSER():
     def _setup_local_directories(self) -> Dict[str, Path]:        
         # Get the project root directory (go up from current file to project root)
         current_file = Path(__file__)
-        project_root = current_file.parents[3]  # Go up 3 levels to reach project root
+        project_root = current_file.parents[4]  # Go up 3 levels to reach project root
         
         # Setup paths using relative paths from project root
         base_path = project_root / self.parser_config["local_storage"]["base_path"]
