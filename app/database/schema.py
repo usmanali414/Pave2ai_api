@@ -238,7 +238,9 @@ async def ensure_collections_and_indexes() -> None:
                             "saving_model": {"bsonType": ["string", "null"]}
                         }
                     },
-                    "model_logs_path": {"bsonType": ["string", "null"]},
+                    "input_weights_s3_url": {"bsonType": ["string", "null"]},
+                    "output_weights_s3_url": {"bsonType": ["string", "null"]},
+                    "output_logs_s3_url": {"bsonType": ["string", "null"]},
                     "results": {"bsonType": ["object", "null"]},
                     "error": {"bsonType": ["string", "null"]}
                 },

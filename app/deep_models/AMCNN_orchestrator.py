@@ -12,7 +12,7 @@ from bson import ObjectId
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.deep_models.base_interfaces import DataParser, Model
+from app.deep_models.base_interfaces import DataParser
 from app.deep_models.Algorithms.AMCNN.v1.AMCNN import AMCNN
 from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
@@ -44,23 +44,24 @@ class AMCNNOrchestrator:
             
             # Set train_run_id for status updates
             self.train_run_id = train_run_id
-            
-            await self._update_train_run_status(train_run_id, "loading_data", "in_progress")
             self.train_config = await self._load_train_config(train_config_id)
-            
-            # Step 2: Load bucket configuration
             self.bucket_config = await self._load_bucket_config(self.train_config["project_id"])
             
-            # Step 3: Load components dynamically based on train_config
+            self.train_config["logs_output_path"] = self._get_logs_output_path()  # uses bucket_config
+            
+            await self._update_train_run_status(train_run_id, "loading_data", "in_progress")
+            
+            # Load components dynamically based on train_config
+            # This will instantiate the data parser and model
+            print(self.train_config)
             components = await self._load_training_components(self.train_config)
             self.data_parser = components["data_parser"]
             self.model = components["model"]
+
+            # Step 4: Load data from S3 to local directories using data parser
+            transferred_data = await self.data_parser.load_data(self.train_config)
             
-            # Step 4: Load data from S3 to local directories
-            data_paths = self._get_data_paths()
-            transferred_data = self.data_parser.load_data(data_paths)
-            
-            if not self.data_parser.validate_data(transferred_data):
+            if not self.data_parser.validate_transferred_data(transferred_data):
                 raise ValueError("Data validation failed")
 
             await self._update_train_run_status(train_run_id, "loading_data", "completed")
@@ -68,7 +69,7 @@ class AMCNNOrchestrator:
             # Step 5: Initialize and run AMCNN preprocessor based on model version
             await self._update_train_run_status(train_run_id, "preprocessing", "in_progress")
             model_version = self.train_config.get("model_version", "v1")
-            X, y = await self._run_amcnn_preprocessor(transferred_data, model_version)
+            await self._run_amcnn_preprocessor(transferred_data, model_version)
             await self._update_train_run_status(train_run_id, "preprocessing", "completed")
             
             # Step 7: Train model
@@ -86,14 +87,11 @@ class AMCNNOrchestrator:
             if training_config["load_initial_weights"]:
                 training_config["initial_weights_path"] = self._get_initial_weights_path()
             
-            training_results = self.model.train(X, y, training_config)
-            if training_results:
+            training_results = self.model.train(training_config)
+            if training_results["status"] == "completed":
                 await self._update_train_run_status(train_run_id, "training", "completed")
-                
-                # Update model logs path if available
-                model_logs_path = training_results.get("model_logs_path")
-                if model_logs_path:
-                    await self._update_model_logs_path(train_run_id, model_logs_path)
+                logger.info(f"{training_results['metrics']}")
+                await self._update_train_run_results(train_run_id, training_results.get("metrics", {}))
             else:
                 await self._update_train_run_status(train_run_id, "training", "failed")
                 raise RuntimeError("Failed to train model")
@@ -109,7 +107,22 @@ class AMCNNOrchestrator:
             else:
                 await self._update_train_run_status(train_run_id, "saving_model", "completed")
             
+            # Step 9: Update train run with all S3 URLs
+            input_weights_url = self._get_initial_weights_path() + "/dummy_model_weights.h5"
+            output_weights_url = weights_path
+            output_logs_url = training_config.get("logs_output_path", "")
+            await self._update_train_run_s3_urls(train_run_id, input_weights_url, output_weights_url, output_logs_url)
+
+            # Step 10: Evaluate model using output_logs_s3_url checkpoint
+            eval_results = self.model.evaluate(
+                dataset_path=self._get_dataset_path(),
+                eval_logs_s3_path=output_logs_url
+            )
+            await self._update_train_run_results(train_run_id, eval_results.get("metrics", {}))
+            
             logger.info("AMCNN training pipeline completed successfully")
+
+            await self._update_train_run_final_status(train_run_id, "completed")
             
             return {
                 "status": "completed",
@@ -192,11 +205,9 @@ class AMCNNOrchestrator:
             output_base = folder_structure.get("train_output_model", "")
             if not output_base:
                 raise ValueError("Model output path not configured in bucket config")
-            
-            # Generate weights filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            weights_filename = f"amcnn_v1_weights_{timestamp}.h5"
-            weights_path = f"{output_base.rstrip('/')}/{weights_filename}"
+           
+            weights_filename = f"amcnn_v1_weights.h5"
+            weights_path = f"{output_base.rstrip('/')}/{self.train_run_id}/{weights_filename}"
             
             logger.info(f"Model weights output path: {weights_path}")
             return weights_path
@@ -215,9 +226,7 @@ class AMCNNOrchestrator:
             if not logs_base:
                 raise ValueError("Training logs output path not configured in bucket config")
             
-            # Generate logs folder path
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            logs_path = f"{logs_base.rstrip('/')}/logs/{timestamp}"
+            logs_path = f"{logs_base.rstrip('/')}/{self.train_run_id}"
             
             logger.info(f"Training logs output path: {logs_path}")
             return logs_path
@@ -238,7 +247,7 @@ class AMCNNOrchestrator:
             
             # For now, we'll look for any .h5 file in the train_input_model folder
             # You can modify this to look for specific filenames if needed
-            initial_weights_path = f"{initial_weights_base.rstrip('/')}/"
+            initial_weights_path = f"{initial_weights_base.rstrip('/')}/{self.train_run_id}"
             
             logger.info(f"Initial weights input path: {initial_weights_path}")
             return initial_weights_path
@@ -295,16 +304,9 @@ class AMCNNOrchestrator:
                 # logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs")
                 
                 # Run preprocessing (assuming the method is called preprocess_images_and_annotations)
-                processed_images, generated_masks = preprocessor.preprocess_images_and_annotations(
+                preprocessor.preprocess_images_and_annotations(
                     image_paths, annotation_paths, project_id
                 )
-                
-                # Convert to numpy arrays for training
-                X = np.array(processed_images)
-                y = np.array(generated_masks)
-                
-                logger.info(f"Preprocessing completed. X shape: {X.shape}, y shape: {y.shape}")
-                return X, y
                 
             except (ImportError, AttributeError) as e:
                 logger.error(f"Failed to load preprocessor for version {model_version}: {str(e)}")
@@ -334,15 +336,10 @@ class AMCNNOrchestrator:
             
             logger.info(f"Loading components: parser={parser_name}, model={model_name} v{model_version}")
             
-            # Get S3 URLs from bucket config
-            s3_urls = self.bucket_config.get("folder_structure", {})
-            
             # Load data parser using exact parser name
             data_parser = await self._load_component_dynamic(
                 component_type="parser",
-                component_name=parser_name,
-                s3_urls=s3_urls,
-                train_config=train_config
+                component_name=parser_name
             )
             
             # Load model using exact model name and version
@@ -382,7 +379,7 @@ class AMCNNOrchestrator:
         """
         try:
             logger.info(f"Loading {component_type}: {component_name}" + 
-                       (f" v{component_version}" if component_version else ""))
+                       (f" {component_version}" if component_version else ""))
             
             if component_type == "parser":
                 # Parser import path: app.deep_models.data_parser.{PARSER_NAME}.{PARSER_NAME}
@@ -393,10 +390,7 @@ class AMCNNOrchestrator:
                 component_class = getattr(module, component_name)
                 
                 # Initialize with parser config
-                config = {
-                    "s3_urls": s3_urls,
-                    "train_config": train_config
-                }
+                config = {}
                 
             elif component_type == "model":
                 # Model import path: app.deep_models.Algorithms.{MODEL_NAME}.{VERSION}.{MODEL_NAME}
@@ -479,11 +473,40 @@ class AMCNNOrchestrator:
         except Exception as e:
             logger.error(f"Error updating final train run status: {str(e)}")
     
-    async def _update_model_logs_path(self, train_run_id: str, logs_path: str):
-        """Update model logs path for a training run."""
+    # async def _update_model_logs_path(self, train_run_id: str, logs_path: str):
+    #     """Update model logs path for a training run."""
+    #     try:
+    #         if not train_run_id:
+    #             logger.warning("No train_run_id available for logs path update")
+    #             return
+            
+    #         db = mongo_client.database
+    #         train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            
+    #         # Convert string train_run_id to ObjectId
+    #         run_id = ObjectId(train_run_id)
+            
+    #         # Update model_logs_path
+    #         update_data = {
+    #             "model_logs_path": logs_path,
+    #             "updated_at": datetime.utcnow()
+    #         }
+            
+    #         await train_runs.update_one(
+    #             {"_id": run_id},
+    #             {"$set": update_data}
+    #         )
+            
+    #         logger.info(f"Updated model logs path: {logs_path}")
+            
+    #     except Exception as e:
+    #         logger.error(f"Error updating model logs path: {str(e)}")
+    
+    async def _update_train_run_s3_urls(self, train_run_id: str, input_weights_url: str, output_weights_url: str, output_logs_url: str):
+        """Update train run with S3 URLs for all generated files."""
         try:
             if not train_run_id:
-                logger.warning("No train_run_id available for logs path update")
+                logger.warning("No train_run_id available for S3 URLs update")
                 return
             
             db = mongo_client.database
@@ -492,9 +515,11 @@ class AMCNNOrchestrator:
             # Convert string train_run_id to ObjectId
             run_id = ObjectId(train_run_id)
             
-            # Update model_logs_path
+            # Update S3 URLs
             update_data = {
-                "model_logs_path": logs_path,
+                "input_weights_s3_url": input_weights_url,
+                "output_weights_s3_url": output_weights_url,
+                "output_logs_s3_url": output_logs_url,
                 "updated_at": datetime.utcnow()
             }
             
@@ -503,10 +528,10 @@ class AMCNNOrchestrator:
                 {"$set": update_data}
             )
             
-            logger.info(f"Updated model logs path: {logs_path}")
+            logger.info(f"Updated train run S3 URLs - Input: {input_weights_url}, Output: {output_weights_url}, Logs: {output_logs_url}")
             
         except Exception as e:
-            logger.error(f"Error updating model logs path: {str(e)}")
+            logger.error(f"Error updating train run S3 URLs: {str(e)}")
     
     def _get_dataset_path(self) -> str:
         """Get the dataset path where patches are stored."""
@@ -525,6 +550,19 @@ class AMCNNOrchestrator:
             logger.error(f"Error getting dataset path: {str(e)}")
             # Fallback to relative path
             return os.path.join(os.getcwd(), "static")
+
+    async def _update_train_run_results(self, train_run_id: str, results: Dict[str, Any]):
+        try:
+            if not train_run_id:
+                logger.warning("No train_run_id available for results update")
+                return
+            db = mongo_client.database
+            train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            run_id = ObjectId(train_run_id)
+            await train_runs.update_one({"_id": run_id}, {"$set": {"results": results, "updated_at": datetime.utcnow()}})
+            logger.info("Updated train run results")
+        except Exception as e:
+            logger.error(f"Error updating train run results: {str(e)}")
 
 
 # Main execution function

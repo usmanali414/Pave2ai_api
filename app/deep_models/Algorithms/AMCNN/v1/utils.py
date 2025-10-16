@@ -130,3 +130,10 @@ def get_callbacks(csv_checkpoint_name, model_checkpoint_name):
     # reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=1e-9, verbose=1)
 
     return [csv_logger, checkpoint]
+
+def check_dir_exists(inputPath, outPath):
+    if not os.path.exists(inputPath):
+        raise Exception("Error:  Input folder does not exist.")
+
+    if not os.path.exists( outPath ):
+        os.makedirs(outPath )

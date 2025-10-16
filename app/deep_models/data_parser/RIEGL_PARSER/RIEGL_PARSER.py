@@ -2,40 +2,49 @@
 RIEGL Parser for transferring data from S3 to local directories.
 """
 from pathlib import Path
+import os
+from pathlib import Path
 from typing import Dict, Any, List
 from app.services.s3.s3_operations import S3Operations
-from app.deep_models.base_interfaces import DataParser
+from app.database.conn import mongo_client
+from config import database_config
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
-from app.deep_models.utils.parser_utils import ParserUtils
 from app.utils.logger_utils import logger
 
-
-class RIEGL_PARSER(DataParser):
+class RIEGL_PARSER():
     """RIEGL Parser for transferring images and annotations from S3 to local directories."""
     
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
+    def __init__(self):
         self.s3_operations = S3Operations()
         self.parser_config = RIEGL_PARSER_CONFIG
-        self.s3_urls = config.get("s3_urls", {})
-        self.train_config = config.get("train_config", {})
-        self._setup_local_directories()
+        self.directories = self._setup_local_directories()
     
-    def _setup_local_directories(self):
-        """Setup local directories using generic parser utils."""
-        # Use generic parser utils to setup directories
-        directories = ParserUtils.setup_local_directories(self.parser_config)
+    def _setup_local_directories(self) -> Dict[str, Path]:        
+        # Get the project root directory (go up from current file to project root)
+        current_file = Path(__file__)
+        project_root = current_file.parents[3]  # Go up 3 levels to reach project root
         
-        # Assign specific directories for RIEGL parser
-        self.images_dir = directories["images_dir"]
-        self.jsons_dir = directories["jsons_dir"]
+        # Setup paths using relative paths from project root
+        base_path = project_root / self.parser_config["local_storage"]["base_path"]
+        
+        # Create directories based on configuration
+        directories = {}
+        
+        for key, relative_path in self.parser_config["local_storage"].items():
+            if key != "base_path":  # Skip base_path itself
+                full_path = base_path / relative_path
+                full_path.mkdir(parents=True, exist_ok=True)
+                directories[key] = full_path
+                logger.info(f"Setup directory: {key} -> {full_path}")
+            
+        return directories
     
-    def load_data(self, data_paths: Dict[str, str]) -> Dict[str, Any]:
+    async def load_data(self, train_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transfer data from S3 to local directories.
         
         Args:
-            data_paths: Dictionary containing S3 paths for different data types
+            train_config: Dictionary containing train configuration
             
         Returns:
             Dictionary containing transfer results and local paths
@@ -44,12 +53,17 @@ class RIEGL_PARSER(DataParser):
         
         try:
             # Get project info from train config
-            project_id = self.train_config.get("project_id")
-            tenant_id = self.train_config.get("tenant_id")
-            
-            # Use S3 URLs from bucket config - transfer images from preprocessed_data and annotations from annotate_label
-            preprocessed_data_url = self.s3_urls.get("preprocessed_data", data_paths.get("preprocessed_data", ""))
-            annotate_label_url = self.s3_urls.get("annotate_label", data_paths.get("annotate_label", ""))
+            project_id = train_config.get("project_id")
+            tenant_id = train_config.get("tenant_id")
+            db = mongo_client.database
+            bucket_configs = db[database_config["BUCKET_CONFIG_COLLECTION"]]
+            bucket_config = await bucket_configs.find_one({"project_id": project_id, "tenant_id": tenant_id})
+            if not bucket_config:
+                raise ValueError(f"Bucket config not found for project: {project_id} and tenant: {tenant_id}")
+
+            folder_structure = bucket_config.get("folder_structure", {})
+            preprocessed_data_url = folder_structure.get("preprocessed_data", "")
+            annotate_label_url = folder_structure.get("annotate_label", "")
             
             if not preprocessed_data_url or not annotate_label_url:
                 raise ValueError(f"Required S3 URLs not found in bucket config. Missing: preprocessed_data={preprocessed_data_url}, annotate_label={annotate_label_url}")
@@ -58,8 +72,8 @@ class RIEGL_PARSER(DataParser):
             logger.info(f"Transferring annotations from: {annotate_label_url}")
             
             # Transfer images and annotations to local directories
-            image_paths = self._transfer_images_from_s3(preprocessed_data_url, project_id)
-            annotation_paths = self._transfer_annotations_from_s3(annotate_label_url, project_id)
+            image_paths = self._transfer_images_from_s3(preprocessed_data_url)
+            annotation_paths = self._transfer_annotations_from_s3(annotate_label_url)
             
             if not image_paths or not annotation_paths:
                 raise ValueError("No images or annotations transferred")
@@ -76,8 +90,8 @@ class RIEGL_PARSER(DataParser):
                     "annotate_label": annotate_label_url
                 },
                 "local_directories": {
-                    "images_dir": str(self.images_dir),
-                    "jsons_dir": str(self.jsons_dir)
+                    "images_dir": str(self.directories["images_dir"]),
+                    "jsons_dir": str(self.directories["jsons_dir"])
                 }
             }
             
@@ -85,25 +99,9 @@ class RIEGL_PARSER(DataParser):
             logger.error(f"Error transferring RIEGL data: {str(e)}")
             raise
     
-    
-    def preprocess(self, data: Dict[str, Any]) -> tuple:
+    def validate_transferred_data(self, data: Dict[str, Any]) -> bool:
         """
-        Preprocess method stub - preprocessing is handled by AMCNN preprocessor.
-        
-        Args:
-            data: Data dictionary from load_data()
-            
-        Returns:
-            Tuple of (X, y) for training (not used since preprocessing is done elsewhere)
-        """
-        logger.info("RIEGL_PARSER.preprocess() method called - preprocessing handled by AMCNN preprocessor")
-        # Return empty arrays since preprocessing is handled by AMCNN preprocessor
-        import numpy as np
-        return np.array([]), np.array([])
-    
-    def validate_data(self, data: Dict[str, Any]) -> bool:
-        """
-        Validate the transferred data using generic parser utils.
+        Validate transferred data structure.
         
         Args:
             data: Data dictionary to validate
@@ -111,22 +109,50 @@ class RIEGL_PARSER(DataParser):
         Returns:
             True if data is valid, False otherwise
         """
+        required_keys = ["image_paths", "annotation_paths"]
         try:
-            # Use generic parser utils for validation
-            required_keys = ["image_paths", "annotation_paths"]
-            return ParserUtils.validate_transferred_data(data, required_keys)
+            # Check required keys
+            for key in required_keys:
+                if key not in data:
+                    logger.error(f"Missing required key: {key}")
+                    return False
+            
+            # Check data types and lengths for path lists
+            for key in required_keys:
+                if key.endswith("_paths"):
+                    paths = data[key]
+                    
+                    if not isinstance(paths, list):
+                        logger.error(f"{key} must be a list")
+                        return False
+                    
+                    if len(paths) == 0:
+                        logger.error(f"Empty {key} list")
+                        return False
+            
+            # Validate that files exist
+            for key in required_keys:
+                if key.endswith("_paths"):
+                    paths = data[key]
+                    
+                    for i, path in enumerate(paths):
+                        if not Path(path).exists():
+                            logger.error(f"File does not exist: {path}")
+                            return False
+            
+            logger.info(f"Data validation passed for keys: {required_keys}")
+            return True
             
         except Exception as e:
             logger.error(f"Error validating data: {str(e)}")
             return False
     
-    def _transfer_images_from_s3(self, s3_base_url: str, project_id: str) -> List[str]:
+    def _transfer_images_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer images from S3 to local directory.
         
         Args:
             s3_base_url: Base S3 URL containing images
-            project_id: Project ID for organizing files
             
         Returns:
             List of local file paths
@@ -140,23 +166,13 @@ class RIEGL_PARSER(DataParser):
             if not list_result["success"]:
                 raise ValueError(f"Failed to list files in {s3_base_url}: {list_result['error']}")
             
-            # Filter for image files
-            supported_formats = self.parser_config["supported_formats"]
-            image_files = [
-                f for f in list_result["files"] 
-                if any(f["key"].lower().endswith(ext.lower()) for ext in supported_formats)
-                and not f["key"].lower().endswith('.json')
-            ]
-            
-            if not image_files:
-                logger.warning(f"No image files found in {s3_base_url}")
-                return local_paths
             
             # Use the configured images directory
-            images_dir = self.images_dir
+            images_dir = self.directories["images_dir"]
+            jsons_dir = self.directories["jsons_dir"]
             
             # Download images to local directory
-            for file_info in image_files:
+            for file_info in list_result["files"]:
                 try:
                     s3_url = file_info["s3_url"]
                     filename = file_info["key"].split('/')[-1]
@@ -186,13 +202,12 @@ class RIEGL_PARSER(DataParser):
             logger.error(f"Error transferring images from S3: {str(e)}")
             return local_paths
     
-    def _transfer_annotations_from_s3(self, s3_base_url: str, project_id: str) -> List[str]:
+    def _transfer_annotations_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer JSON annotations from S3 to local directory.
         
         Args:
             s3_base_url: Base S3 URL containing annotations
-            project_id: Project ID for organizing files
             
         Returns:
             List of local file paths
@@ -217,7 +232,7 @@ class RIEGL_PARSER(DataParser):
                 return local_paths
             
             # Use the configured JSONs directory
-            jsons_dir = self.jsons_dir
+            jsons_dir = self.directories["jsons_dir"]
             
             # Download annotations to local directory
             for file_info in json_files:

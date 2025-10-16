@@ -70,16 +70,21 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
     run_doc = {
         "train_config_id": train_config_id,
         "status": "training",
-        "created_at": now,
-        "updated_at": now,
-        "ended_at": None,
         "step_status": {
             "loading_data": None,
             "preprocessing": None,
             "training": None,
             "saving_model": None
         },
-        "model_logs_path": None
+        # canonical S3 url fields (initialized as null)
+        "input_weights_s3_url": None,
+        "output_weights_s3_url": None,
+        "output_logs_s3_url": None,
+        # results/error placeholders
+        "results": None,
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
     }
     result = await train_runs.insert_one(run_doc)
     run_id = str(result.inserted_id)
@@ -253,7 +258,7 @@ async def _run_orchestrator(train_config: Dict[str, Any], train_run_id: str) -> 
         model_name = normalize_component_name(train_config["metadata"].get("model_name"))
         model_version = normalize_component_name(train_config.get("model_version"))
         
-        logger.info(f"Determining orchestrator for {model_name} v{model_version}")
+        logger.info(f"Determining orchestrator for {model_name} {model_version}")
         
         # Dynamically import and run orchestrator based on model name
         orchestrator_module_path = f"app.deep_models.{model_name}_orchestrator"

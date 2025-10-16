@@ -5,11 +5,9 @@ import warnings
 warnings.filterwarnings('ignore')
 import os
 import time
+import tempfile
 import numpy as np
 from typing import Dict, Any, Tuple
-from datetime import datetime
-from app.deep_models.base_interfaces import Model
-from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
 from app.services.s3.s3_operations import S3Operations
 from app.utils.logger_utils import logger
 
@@ -30,7 +28,7 @@ from app.deep_models.Algorithms.AMCNN.v1.model import modelMCNN
 from app.deep_models.Algorithms.AMCNN.v1.data_generators import DataGen
 from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
 
-class AMCNN(Model):
+class AMCNN():
     """AMCNN v1 model implementation for point cloud classification."""
     
     def __init__(self, model_config: Dict[str, Any] = None):
@@ -44,13 +42,11 @@ class AMCNN(Model):
         self.training_configs = AMCNN_V1_CONFIG()
         self.model_mcnn = None
     
-    def train(self, X: np.ndarray, y: np.ndarray, config: Dict[str, Any] = None) -> Dict[str, Any]:
+    def train(self, config: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Train the AMCNN model with given data.
         
         Args:
-            X: Training features (point clouds)
-            y: Training labels
             config: Additional training configuration
             
         Returns:
@@ -115,7 +111,7 @@ class AMCNN(Model):
             elif load_initial_weights:
                 # Create new weights, save to S3, then load them
                 logger.info("Creating new initial weights (load_initial_weights=true but no path provided)")
-                weights_created = self._create_and_save_initial_weights(config)
+                weights_created = self._create_and_save_initial_weights("dummy_model_weights.h5", config.get('initial_weights_path', ''))
                 if weights_created:
                     logger.info("Successfully created and saved initial weights")
                 else:
@@ -127,16 +123,15 @@ class AMCNN(Model):
             logs_output_path = config.get('logs_output_path', '')
             if logs_output_path:
                 # Create local temp directory for logs
-                modelpath = os.path.join(os.getcwd(), 'temp_logs')
-                if not os.path.exists(modelpath):
-                    logger.info(f'Created temp model folder at {modelpath}')
-                    os.makedirs(modelpath)
+                modelpath = tempfile.mkdtemp(prefix='amcnn_logs_')
+                logger.info(f'Created temp model folder at {modelpath}')
                     
                 model_checkpoint_name = os.path.join(modelpath, self.training_configs.modelname + '.h5')
                 csv_checkpoint_name = os.path.join(modelpath, self.training_configs.modelname + '.csv')
                 
                 # Store S3 path for later upload
                 self.s3_logs_path = logs_output_path
+                self.modelpath = modelpath
             else:
                 # Fallback to local path
                 modelpath = os.path.join(os.getcwd(), self.training_configs.model_path)
@@ -192,22 +187,6 @@ class AMCNN(Model):
                 "metrics": {}
             }
     
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Make predictions on new data.
-        
-        Args:
-            X: Input features (point clouds)
-            
-        Returns:
-            Predictions
-        """
-        logger.info(f"AMCNN.predict() method called - input shape: {X.shape}")
-        logger.info("Making predictions...")
-        # Return dummy predictions
-        import numpy as np
-        return np.array([[0.5, 0.5]])  # Dummy prediction
-    
     def save_weights(self, weights_path: str) -> bool:
         """
         Save model weights to S3.
@@ -226,11 +205,10 @@ class AMCNN(Model):
                 return False
             
             # Create local temp directory for weights
-            local_temp_dir = os.path.join(os.getcwd(), 'temp_final_weights')
-            os.makedirs(local_temp_dir, exist_ok=True)
+            local_temp_dir = tempfile.mkdtemp(prefix='amcnn_final_weights_')
             
-            # Extract filename from S3 path
-            weights_filename = os.path.basename(weights_path)
+            # Use fixed filename for final weights
+            weights_filename = "amcnn_v1_weights.h5"
             local_weights_path = os.path.join(local_temp_dir, weights_filename)
             
             # Save model weights locally first
@@ -259,150 +237,6 @@ class AMCNN(Model):
             logger.error(f"Error saving trained model weights: {str(e)}")
             return False
     
-    def load_weights(self, weights_path: str) -> bool:
-        """
-        Load model weights from S3.
-        
-        Args:
-            weights_path: S3 path to load weights from
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        logger.info(f"AMCNN.load_weights() method called - loading from: {weights_path}")
-        logger.info("Model weights loaded successfully")
-        return True
-    
-    def get_model_info(self) -> Dict[str, Any]:
-        """
-        Get model information and configuration.
-        
-        Returns:
-            Dictionary containing model information
-        """
-        logger.info("AMCNN.get_model_info() method called")
-        return {
-            "model_name": "AMCNN",
-            "version": "v1",
-            "message": "Model info retrieved successfully"
-        }
-    
-    def _build_model(self, input_shape: Tuple[int, ...]):
-        """Build the AMCNN model architecture."""
-        if not TENSORFLOW_AVAILABLE:
-            self.model = "dummy_model"  # Fallback
-            self.is_compiled = True
-            return
-        
-        arch_config = self.config["architecture"]
-        
-        # Input layer
-        inputs = keras.Input(shape=input_shape, name="point_cloud_input")
-        
-        # Point cloud processing layers
-        x = layers.Dense(64, activation=arch_config["activation"])(inputs)
-        x = layers.Dropout(arch_config["dropout_rate"])(x)
-        
-        # Feature extraction layers
-        for hidden_size in arch_config["hidden_layers"]:
-            x = layers.Dense(hidden_size, activation=arch_config["activation"])(x)
-            x = layers.Dropout(arch_config["dropout_rate"])(x)
-        
-        # Global feature aggregation (mean pooling)
-        x = layers.GlobalAveragePooling1D()(x)
-        
-        # Classification head
-        x = layers.Dense(arch_config["feature_dim"], activation=arch_config["activation"])(x)
-        x = layers.Dropout(arch_config["dropout_rate"])(x)
-        outputs = layers.Dense(arch_config["num_classes"], activation="softmax")(x)
-        
-        # Create model
-        self.model = keras.Model(inputs=inputs, outputs=outputs, name="AMCNN_v1")
-        
-        # Compile model
-        train_config = self.config["training"]
-        self.model.compile(
-            optimizer=optimizers.Adam(learning_rate=train_config["learning_rate"]),
-            loss=train_config["loss_function"],
-            metrics=train_config["metrics"]
-        )
-        
-        self.is_compiled = True
-        logger.info("AMCNN v1 model built and compiled successfully")
-    
-    def _prepare_training_data(self, X: np.ndarray, y: np.ndarray, train_config: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare data for training."""
-        # Convert labels to categorical if needed
-        if len(y.shape) == 1:
-            from keras.utils import to_categorical  # type: ignore
-            y_categorical = to_categorical(y, num_classes=self.config["architecture"]["num_classes"])
-        else:
-            y_categorical = y
-        
-        return X, y_categorical
-    
-    def _preprocess_input(self, X: np.ndarray) -> np.ndarray:
-        """Preprocess input data for prediction."""
-        # Ensure correct shape
-        if len(X.shape) == 2:
-            X = X.reshape(1, -1, 3)
-        return X
-    
-    def _setup_callbacks(self, train_config: Dict[str, Any]) -> list:
-        """Setup training callbacks."""
-        if not TENSORFLOW_AVAILABLE:
-            return []
-        
-        callbacks_list = []
-        
-        # Early stopping
-        if train_config.get("early_stopping"):
-            early_stop = callbacks.EarlyStopping(**train_config["early_stopping"])
-            callbacks_list.append(early_stop)
-        
-        # Learning rate reduction
-        if train_config.get("reduce_lr"):
-            reduce_lr = callbacks.ReduceLROnPlateau(**train_config["reduce_lr"])
-            callbacks_list.append(reduce_lr)
-        
-        return callbacks_list
-    
-    def _calculate_metrics(self, X: np.ndarray, y: np.ndarray) -> Dict[str, float]:
-        """Calculate training metrics."""
-        if TENSORFLOW_AVAILABLE and self.model is not None:
-            try:
-                predictions = self.model.predict(X, verbose=0)
-                y_pred = np.argmax(predictions, axis=1)
-                y_true = np.argmax(y, axis=1) if len(y.shape) > 1 else y
-                
-                accuracy = np.mean(y_pred == y_true)
-                return {"accuracy": float(accuracy)}
-            except Exception as e:
-                logger.error(f"Error calculating metrics: {str(e)}")
-        
-        # Fallback metrics
-        return {"accuracy": 0.85, "loss": 0.3}
-    
-    def _fallback_training(self, X: np.ndarray, y: np.ndarray, train_config: Dict[str, Any]) -> Dict[str, list]:
-        """Fallback training when TensorFlow is not available."""
-        logger.info("Using fallback training (TensorFlow not available)")
-        
-        epochs = train_config.get("epochs", 10)
-        history = {
-            "loss": [0.5 - i * 0.02 for i in range(epochs)],
-            "accuracy": [0.5 + i * 0.03 for i in range(epochs)],
-            "val_loss": [0.6 - i * 0.015 for i in range(epochs)],
-            "val_accuracy": [0.45 + i * 0.025 for i in range(epochs)]
-        }
-        
-        return history
-    
-    def _fallback_predict(self, X: np.ndarray) -> np.ndarray:
-        """Fallback prediction when TensorFlow is not available."""
-        # Return random predictions
-        num_classes = self.config["architecture"]["num_classes"]
-        return np.random.randint(0, num_classes, size=len(X))
-    
     def _reading_data(self, split_data_path, class_folder_dict, batch_size):
         """Read training data using data generators."""
         logger.info("Setting up data generators...")
@@ -427,7 +261,6 @@ class AMCNN(Model):
         return [csv_logger, checkpoint, reduce_lr]
     
     def _upload_training_logs_to_s3(self):
-        """Upload training logs to S3."""
         try:
             if not hasattr(self, 's3_logs_path') or not self.s3_logs_path:
                 logger.warning("No S3 logs path configured")
@@ -435,25 +268,22 @@ class AMCNN(Model):
             
             logger.info(f"Uploading training logs to S3: {self.s3_logs_path}")
             
-            # Upload CSV training history
-            csv_file_path = os.path.join(os.getcwd(), 'temp_logs', self.training_configs.modelname + '.csv')
+            csv_file_path = os.path.join(self.modelpath, self.training_configs.modelname + '.csv')
             if os.path.exists(csv_file_path):
-                csv_s3_path = f"{self.s3_logs_path}/{self.training_configs.modelname}.csv"
+                csv_s3_path = f"{self.s3_logs_path}/experiment1_accumulated_checkpointV1.csv"
                 self.s3_operations.upload_file(csv_file_path, csv_s3_path)
                 logger.info(f"Uploaded training CSV to: {csv_s3_path}")
             
-            # Upload model checkpoint if exists
-            model_file_path = os.path.join(os.getcwd(), 'temp_logs', self.training_configs.modelname + '.h5')
+            model_file_path = os.path.join(self.modelpath, self.training_configs.modelname + '.h5')
             if os.path.exists(model_file_path):
-                model_s3_path = f"{self.s3_logs_path}/{self.training_configs.modelname}.h5"
+                model_s3_path = f"{self.s3_logs_path}/experiment1_accumulated_checkpointV1.h5"
                 self.s3_operations.upload_file(model_file_path, model_s3_path)
                 logger.info(f"Uploaded model checkpoint to: {model_s3_path}")
             
             # Clean up temp directory
             import shutil
-            temp_logs_dir = os.path.join(os.getcwd(), 'temp_logs')
-            if os.path.exists(temp_logs_dir):
-                shutil.rmtree(temp_logs_dir)
+            if hasattr(self, 'modelpath') and os.path.exists(self.modelpath):
+                shutil.rmtree(self.modelpath)
                 logger.info("Cleaned up temporary logs directory")
                 
         except Exception as e:
@@ -510,8 +340,7 @@ class AMCNN(Model):
             full_s3_path = f"{weights_path.rstrip('/')}/{weights_file_name}"
             
             # Download weights file to local temp directory
-            local_temp_dir = os.path.join(os.getcwd(), 'temp_weights')
-            os.makedirs(local_temp_dir, exist_ok=True)
+            local_temp_dir = tempfile.mkdtemp(prefix='amcnn_weights_')
             # Use the filename we already extracted
             local_weights_path = os.path.join(local_temp_dir, weights_file_name)
             
@@ -537,7 +366,7 @@ class AMCNN(Model):
                     logger.info("Creating new initial weights with correct architecture...")
                     
                     # Create and save new initial weights with correct architecture
-                    success = self._create_and_save_initial_weights(weights_file_name, weights_path)
+                    success = self._create_and_save_initial_weights(weights_path)
                     if success:
                         logger.info("Successfully created and saved new initial weights with correct architecture")
                         
@@ -570,11 +399,10 @@ class AMCNN(Model):
                 return False
             
             # Create local temp directory for initial weights
-            local_temp_dir = os.path.join(os.getcwd(), 'temp_initial_weights')
-            os.makedirs(local_temp_dir, exist_ok=True)
+            local_temp_dir = tempfile.mkdtemp(prefix='amcnn_initial_weights_')
             
-            # Use target filename
-            initial_weights_filename = target_filename
+            # Use fixed filename for initial weights
+            initial_weights_filename = "dummy_model_weights.h5"
             local_weights_path = os.path.join(local_temp_dir, initial_weights_filename)
             
             # Save model weights locally first
@@ -599,3 +427,108 @@ class AMCNN(Model):
         except Exception as e:
             logger.error(f"Error creating and saving initial weights: {str(e)}")
             return False
+
+    def _write_eval_csv(self, file_path: str, evaluation_results: dict) -> None:
+        with open(file_path, 'w') as f:
+            f.write('Metric,Value\n')
+            for metric, value in evaluation_results.items():
+                f.write(f'{metric},{value}\n')
+
+    def evaluate(self, dataset_path: str, eval_logs_s3_path: str = "", checkpoint_path: str = None) -> Dict[str, Any]:
+        """
+        Evaluate AMCNN using:
+        - eval_logs_s3_path: S3 folder (output_logs_s3_url) containing the trained checkpoint (.h5)
+        - OR local checkpoint_path override.
+        Uses AMCNN_V1_CONFIG for all parameters and data layout. Outputs loss and accuracy (no F1).
+        """
+        logger.info("AMCNN.evaluate() - starting")
+
+        if not TENSORFLOW_AVAILABLE:
+            logger.error("TensorFlow not available for evaluation")
+            return {"status": "failed", "message": "TensorFlow not available", "metrics": {}}
+
+        try:
+            start_time = time.time()
+            configs = self.training_configs
+            learningRate = configs.modelConfg['learning_rate']
+            optim = Adam(learningRate)
+
+            # Build model in inference mode
+            self.model_mcnn = modelMCNN(configs.labels_dict, configs.modelConfg, configs.base_patch_size)
+            self.model = self.model_mcnn.classifier(optim, is_training=False)
+
+            # Resolve checkpoint: prefer S3 logs folder if provided
+            temp_ckpt_dir = tempfile.mkdtemp(prefix='amcnn_eval_ckpt_')
+            chosen_ckpt = None
+
+            if eval_logs_s3_path:
+                logger.info(f"Listing S3 logs path for checkpoint: {eval_logs_s3_path}")
+                list_result = self.s3_operations.list_files(eval_logs_s3_path)
+                if not list_result.get("success"):
+                    return {"status": "failed", "message": f"Failed to list S3 logs: {list_result.get('error','unknown')}", "metrics": {}}
+                # Prefer .h5 checkpoint
+                files = list_result.get("files", [])
+                ckpt_keys = [f["key"] for f in files if f["key"].lower().endswith(".h5")]
+                if ckpt_keys:
+                    ckpt_key = ckpt_keys[0]
+                    ckpt_filename = os.path.basename(ckpt_key)
+                    local_ckpt = os.path.join(temp_ckpt_dir, ckpt_filename)
+                    download = self.s3_operations.download_file(f"{eval_logs_s3_path.rstrip('/')}/{ckpt_filename}", local_ckpt)
+                    if not download.get("success"):
+                        return {"status": "failed", "message": f"Failed to download checkpoint: {download.get('error','unknown')}", "metrics": {}}
+                    chosen_ckpt = local_ckpt
+
+            # Local override or fallback
+            if checkpoint_path and not chosen_ckpt:
+                chosen_ckpt = checkpoint_path
+            if not chosen_ckpt:
+                modelpath = os.path.join(os.getcwd(), configs.model_path)
+                default_ckpt = os.path.join(modelpath, configs.modelname + '.h5')
+                logs_ckpt = os.path.join('./model_Logs', configs.modelname + '.h5')
+                chosen_ckpt = logs_ckpt if os.path.exists(logs_ckpt) else default_ckpt
+
+            if not os.path.exists(chosen_ckpt):
+                raise Exception('Checkpoint does not exists!!!')
+
+            self.model.load_weights(chosen_ckpt)
+
+            # Build generators
+            split_data_path = os.path.join(dataset_path, configs.train_data_path)
+            if not os.path.exists(split_data_path):
+                raise Exception('data path does not exists!!!', split_data_path)
+
+            train_gen, val_gen, test_gen = self._reading_data(
+                split_data_path,
+                configs.class_folder_dict,
+                configs.modelConfg['batch_size']
+            )
+
+            # Evaluate on test (loss and accuracy only)
+            logger.info("Test Evaluation")
+            evaluation_results = self.model.evaluate(
+                test_gen, batch_size=configs.modelConfg['batch_size']
+            )
+            print(evaluation_results)
+
+            loss = float(evaluation_results[0]) if isinstance(evaluation_results, (list, tuple)) else float(evaluation_results)
+            accuracy = float(evaluation_results[1]) if isinstance(evaluation_results, (list, tuple)) and len(evaluation_results) > 1 else None
+
+            evaluation_dict = {'Loss': loss}
+            if accuracy is not None:
+                evaluation_dict['Accuracy'] = accuracy
+
+            self._write_eval_csv('./results.csv', evaluation_dict)
+            total_time = time.time() - start_time
+            print(f"Script execution time: {total_time} seconds")
+
+            logger.info(f"Evaluation completed: {evaluation_dict}")
+            return {
+                "status": "completed",
+                "message": "Evaluation completed",
+                "metrics": evaluation_dict,
+                "execution_time_sec": total_time
+            }
+
+        except Exception as e:
+            logger.error(f"Error during evaluation: {str(e)}")
+            return {"status": "failed", "message": f"Evaluation failed: {str(e)}", "metrics": {}}

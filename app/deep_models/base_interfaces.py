@@ -49,69 +49,46 @@ class DataParser(ABC):
         pass
 
 
-class Model(ABC):
-    """Base interface for ML models."""
+# class Model(ABC):
+#     """Base interface for ML models."""
     
-    @abstractmethod
-    def train(self, X: np.ndarray, y: np.ndarray, config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Train the model with given data.
+#     @abstractmethod
+#     def train(self, X: np.ndarray, y: np.ndarray, config: Dict[str, Any]) -> Dict[str, Any]:
+#         """
+#         Train the model with given data.
         
-        Args:
-            X: Training features
-            y: Training labels
-            config: Training configuration
+#         Args:
+#             X: Training features
+#             y: Training labels
+#             config: Training configuration
             
-        Returns:
-            Training metrics and results
-        """
-        pass
+#         Returns:
+#             Training metrics and results
+#         """
+#         pass
     
-    @abstractmethod
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Make predictions on new data.
+#     @abstractmethod
+#     def save_weights(self, weights_path: str) -> bool:
+#         """
+#         Save model weights to specified path.
         
-        Args:
-            X: Input features
+#         Args:
+#             weights_path: S3 path to save weights
             
-        Returns:
-            Predictions
-        """
-        pass
+#         Returns:
+#             True if successful, False otherwise
+#         """
+#         pass
     
-    @abstractmethod
-    def save_weights(self, weights_path: str) -> bool:
-        """
-        Save model weights to specified path.
+#     @abstractmethod
+#     def load_weights(self, weights_path: str) -> bool:
+#         """
+#         Load model weights from specified path.
         
-        Args:
-            weights_path: S3 path to save weights
+#         Args:
+#             weights_path: S3 path to load weights from
             
-        Returns:
-            True if successful, False otherwise
-        """
-        pass
-    
-    @abstractmethod
-    def load_weights(self, weights_path: str) -> bool:
-        """
-        Load model weights from specified path.
-        
-        Args:
-            weights_path: S3 path to load weights from
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        pass
-    
-    @abstractmethod
-    def get_model_info(self) -> Dict[str, Any]:
-        """
-        Get model information and configuration.
-        
-        Returns:
-            Dictionary containing model information
-        """
-        pass
+#         Returns:
+#             True if successful, False otherwise
+#         """
+#         pass

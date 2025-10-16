@@ -17,18 +17,7 @@ from tqdm import tqdm as tq
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
-
-
-def check_dir_exists(inputPath, outPath):
-    if not os.path.exists(inputPath):
-        raise Exception("Error:  Input folder does not exist.")
-
-    #   if not os.path.exists(colorCodeFilePath):
-        # raise Exception("Error:  CSV file that contains color code doesn't exist")
-
-    if not os.path.exists( outPath ):
-        os.makedirs(outPath )
-
+from app.deep_models.Algorithms.AMCNN.v1.utils import check_dir_exists
 
 class maskGenerate():
 
@@ -408,9 +397,6 @@ class RIEGLPreprocessor:
             # Create subdirectories for train/test/val splits
             data_subsets = ['train','test','val']
             classes_code = ['0','1','2','3','4']
-            
-            data_subsets = ['train','test','val']
-            classes_code = ['0','1','2','3','4']
 
             for subset_iter in data_subsets:
                 for class_iter in classes_code:
@@ -428,7 +414,7 @@ class RIEGLPreprocessor:
             train_mappings = img_mask_mappings[:train_cut]
             val_mappings = img_mask_mappings[train_cut:train_cut+val_cut]   
             test_mappings = img_mask_mappings[train_cut+val_cut:]
-            # test_mappings = img_mask_mappings[train_cut+val_cut:]
+            # test_mappings = img_mask_mappings[train_cut+val_cut:]x
             
             logger.info(f"Total valid image-mask pairs: {len(img_mask_mappings)}")
             
@@ -453,12 +439,6 @@ class RIEGLPreprocessor:
             total_time = time.time() - start_time
             logger.info(f"Total preprocessing completed in {total_time} seconds")
             
-            # Return dummy data for training pipeline (since actual images/masks/patches are saved to disk)
-            dummy_images = [np.random.rand(224, 224, 3) for _ in range(len(image_paths))]
-            dummy_masks = [np.random.rand(224, 224, 1) for _ in range(len(image_paths))]
-            
-            logger.info("Preprocessing completed successfully - masks and patches generated")
-            return dummy_images, dummy_masks
         else:
             logger.warning("No image-annotation paths provided")
             return [], []
