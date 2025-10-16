@@ -631,6 +631,106 @@ class S3Operations:
                 "s3_url": s3_url
             }
 
+    @staticmethod
+    def delete_folder_contents(
+        s3_url_prefix: str,
+        max_keys: int = 1000
+    ) -> Dict[str, Union[bool, str, int]]:
+        """
+        Delete all files in an S3 folder/prefix.
+        
+        Args:
+            s3_url_prefix: S3 URL prefix to delete (e.g., "s3://bucket/path/")
+            max_keys: Maximum number of keys to process in one batch
+        
+        Returns:
+            Dict with deletion results and statistics
+        """
+        if not s3_client.is_initialized():
+            logger.error("S3 client not initialized")
+            return {
+                "success": False,
+                "error": "S3 client not initialized"
+            }
+        
+        try:
+            # Parse S3 URL
+            bucket_name, key_prefix = S3Operations.parse_s3_url(s3_url_prefix)
+            
+            # List all objects with the prefix
+            list_result = S3Operations.list_files(s3_url_prefix, max_keys=max_keys)
+            
+            if not list_result["success"]:
+                return {
+                    "success": False,
+                    "error": f"Failed to list files: {list_result['error']}"
+                }
+            
+            files = list_result["files"]
+            
+            if not files:
+                logger.info(f"No files found to delete in {s3_url_prefix}")
+                return {
+                    "success": True,
+                    "deleted_count": 0,
+                    "message": "No files found to delete"
+                }
+            
+            # Delete files in batches (S3 supports up to 1000 objects per batch)
+            deleted_count = 0
+            failed_count = 0
+            batch_size = 1000
+            
+            for i in range(0, len(files), batch_size):
+                batch = files[i:i + batch_size]
+                
+                # Prepare delete objects list
+                delete_objects = []
+                for file_info in batch:
+                    delete_objects.append({
+                        'Key': file_info['key']
+                    })
+                
+                try:
+                    # Delete batch
+                    response = s3_client.client.delete_objects(
+                        Bucket=bucket_name,
+                        Delete={
+                            'Objects': delete_objects
+                        }
+                    )
+                    
+                    # Count successful deletions
+                    if 'Deleted' in response:
+                        deleted_count += len(response['Deleted'])
+                    
+                    # Count failed deletions
+                    if 'Errors' in response:
+                        failed_count += len(response['Errors'])
+                        for error in response['Errors']:
+                            logger.error(f"Failed to delete {error['Key']}: {error['Message']}")
+                
+                except Exception as e:
+                    logger.error(f"Error deleting batch: {str(e)}")
+                    failed_count += len(batch)
+            
+            logger.info(f"Deleted {deleted_count} files, {failed_count} failed from {s3_url_prefix}")
+            
+            return {
+                "success": failed_count == 0,
+                "deleted_count": deleted_count,
+                "failed_count": failed_count,
+                "total_files": len(files),
+                "message": f"Deleted {deleted_count} files, {failed_count} failed"
+            }
+            
+        except Exception as e:
+            logger.error(f"Unexpected error deleting folder contents for {s3_url_prefix}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
 
 # Singleton instance
 s3_operations = S3Operations()

@@ -24,16 +24,6 @@ database_config = {
     "TRAIN_RUN_COLLECTION": "train_runs"
 }
 
-# try:
-#     key = os.getenv("CIPHER_KEY")
-#     if key is None:
-#         raise ValueError("CIPHER_KEY is not set")
-#     logger.info(f"Cipher key: {key}")
-#     cipher = Fernet(key)
-# except Exception as e:
-#     logger.error(f"Error initializing cipher: {e}")
-#     raise e
-
 JWT_CONFIG = {
     "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY"),
     "JWT_REFRESH_SECRET_KEY": os.getenv("JWT_REFRESH_SECRET_KEY"),
