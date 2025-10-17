@@ -25,7 +25,7 @@ class AMCNN_V1_CONFIG():
     labels_dict = {0: 678131, 1: 3746977, 2: 107784, 3: 143241,4:5236}
     modelConfg = {'class_num':5,
               'learning_rate': 0.0001,#0.0001,
-              'N_epoch':2,
+              'N_epoch':1,
               'batch_size':200}
 
     class_folder_dict = {'0':0,'1':1,'2':2,'3':3,'4':4}

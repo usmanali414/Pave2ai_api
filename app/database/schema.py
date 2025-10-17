@@ -240,9 +240,9 @@ async def ensure_collections_and_indexes() -> None:
                     },
                     "input_weights_s3_url": {"bsonType": ["string", "null"]},
                     "output_weights_s3_url": {"bsonType": ["string", "null"]},
-                    "output_logs_s3_url": {"bsonType": ["string", "null"]},
-                    "results": {"bsonType": ["object", "null"]},
-                    "error": {"bsonType": ["string", "null"]}
+                    "output_logs_s3_url": {"bsonType": ["string", "null"]},       # training logs folder
+                    "evaluation_logs_s3_url": {"bsonType": ["string", "null"]},    # evaluation CSV path
+                    "error": {"bsonType": ["string", "null"]},
                 },
             }
         }
