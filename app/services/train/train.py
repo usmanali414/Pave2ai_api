@@ -1,7 +1,9 @@
 import sys
 import os
+import asyncio
 from datetime import datetime
 from typing import Any, Dict
+from concurrent.futures import ThreadPoolExecutor
 
 # Add the project root to Python path for orchestrator import
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -11,6 +13,10 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.utils.logger_utils import logger
 import importlib
+
+# Global thread pool executor for CPU-bound training tasks
+# Max 2 concurrent trainings to prevent resource exhaustion
+training_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="training_")
 
 
 def normalize_component_name(name: str) -> str:
@@ -80,8 +86,7 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
         "input_weights_s3_url": None,
         "output_weights_s3_url": None,
         "output_logs_s3_url": None,
-        # results/error placeholders
-        "results": None,
+        "evaluation_logs_s3_url": None,
         "error": None,
         "created_at": now,
         "updated_at": now,
