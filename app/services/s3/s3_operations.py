@@ -317,16 +317,18 @@ class S3Operations:
     @staticmethod
     def list_files(
         s3_url_prefix: str,
-        max_keys: int = 1000,
-        delimiter: Optional[str] = None
+        max_keys: int = None,
+        delimiter: Optional[str] = None,
+        fetch_all: bool = True
     ) -> Dict[str, Union[bool, List, str]]:
         """
         List files in an S3 location
         
         Args:
             s3_url_prefix: S3 URL prefix to search (e.g., "s3://bucket/path/")
-            max_keys: Maximum number of keys to return
+            max_keys: Maximum number of keys to return (None = no limit, fetch all with pagination)
             delimiter: Character to use to group keys
+            fetch_all: If True, automatically paginate through all results (default: True)
         
         Returns:
             Dict with list of files and metadata
@@ -342,44 +344,67 @@ class S3Operations:
             # Parse S3 URL
             bucket_name, key_prefix = S3Operations.parse_s3_url(s3_url_prefix)
             
-            # List objects
-            list_params = {
-                'Bucket': bucket_name,
-                'MaxKeys': max_keys
-            }
-            
-            if key_prefix:
-                list_params['Prefix'] = key_prefix
-            
-            if delimiter:
-                list_params['Delimiter'] = delimiter
-            
-            response = s3_client.client.list_objects_v2(**list_params)
-            
             files = []
-            
-            # Process files
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    files.append({
-                        "key": obj['Key'],
-                        "s3_url": S3Operations.build_s3_url(bucket_name, obj['Key']),
-                        "size": obj['Size'],
-                        "last_modified": obj['LastModified'],
-                        "etag": obj['ETag'].strip('"'),
-                        "storage_class": obj.get('StorageClass', 'STANDARD')
-                    })
-            
-            # Process common prefixes (folders)
             folders = []
-            if 'CommonPrefixes' in response:
-                for prefix in response['CommonPrefixes']:
-                    folders.append({
-                        "prefix": prefix['Prefix'],
-                        "s3_url": S3Operations.build_s3_url(bucket_name, prefix['Prefix'])
-                    })
+            continuation_token = None
+            total_iterations = 0
             
-            logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix}")
+            # Keep fetching until we have all files or reach max_keys
+            while True:
+                # List objects
+                list_params = {
+                    'Bucket': bucket_name,
+                    'MaxKeys': 1000  # S3 API max per request
+                }
+                
+                if key_prefix:
+                    list_params['Prefix'] = key_prefix
+                
+                if delimiter:
+                    list_params['Delimiter'] = delimiter
+                
+                if continuation_token:
+                    list_params['ContinuationToken'] = continuation_token
+                
+                response = s3_client.client.list_objects_v2(**list_params)
+                total_iterations += 1
+                
+                # Process files
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        files.append({
+                            "key": obj['Key'],
+                            "s3_url": S3Operations.build_s3_url(bucket_name, obj['Key']),
+                            "size": obj['Size'],
+                            "last_modified": obj['LastModified'],
+                            "etag": obj['ETag'].strip('"'),
+                            "storage_class": obj.get('StorageClass', 'STANDARD')
+                        })
+                
+                # Process common prefixes (folders)
+                if 'CommonPrefixes' in response:
+                    for prefix in response['CommonPrefixes']:
+                        folders.append({
+                            "prefix": prefix['Prefix'],
+                            "s3_url": S3Operations.build_s3_url(bucket_name, prefix['Prefix'])
+                        })
+                
+                # Check if we should continue pagination
+                is_truncated = response.get('IsTruncated', False)
+                continuation_token = response.get('NextContinuationToken')
+                
+                # Stop if: not truncated, fetch_all is False, or reached max_keys
+                if not is_truncated:
+                    break
+                
+                if not fetch_all:
+                    break
+                
+                if max_keys is not None and len(files) >= max_keys:
+                    files = files[:max_keys]  # Trim to max_keys
+                    break
+            
+            logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix} (iterations: {total_iterations})")
             
             return {
                 "success": True,
@@ -387,8 +412,8 @@ class S3Operations:
                 "folders": folders,
                 "total_files": len(files),
                 "total_folders": len(folders),
-                "is_truncated": response.get('IsTruncated', False),
-                "next_continuation_token": response.get('NextContinuationToken')
+                "is_truncated": False,  # Always False since we fetched all
+                "next_continuation_token": None
             }
             
         except Exception as e:
@@ -634,14 +659,14 @@ class S3Operations:
     @staticmethod
     def delete_folder_contents(
         s3_url_prefix: str,
-        max_keys: int = 1000
+        max_keys: int = None
     ) -> Dict[str, Union[bool, str, int]]:
         """
         Delete all files in an S3 folder/prefix.
         
         Args:
             s3_url_prefix: S3 URL prefix to delete (e.g., "s3://bucket/path/")
-            max_keys: Maximum number of keys to process in one batch
+            max_keys: Maximum number of keys to process (None = no limit, delete all files)
         
         Returns:
             Dict with deletion results and statistics
@@ -657,7 +682,7 @@ class S3Operations:
             # Parse S3 URL
             bucket_name, key_prefix = S3Operations.parse_s3_url(s3_url_prefix)
             
-            # List all objects with the prefix
+            # List all objects with the prefix (fetch_all=True by default)
             list_result = S3Operations.list_files(s3_url_prefix, max_keys=max_keys)
             
             if not list_result["success"]:
