@@ -11,13 +11,13 @@ UPLOAD_CONFIGS = [
     {
         "name": "Images",
         "local_path": "E:\Pave2ai_api\static\dataset\orig_images",
-        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68f109995dd0ed6524f76dcb/data/preprocessed/",
+        "s3_url": "s3://testusman123/accounts/68f7e3df3d12fbbeeae2d9be/project/68f7e4023d12fbbeeae2d9c0/data/preprocessed/",
         "file_extension": "*.jpg"
     },
     {
         "name": "JSON Annotations",
         "local_path": "E:\Pave2ai_api\static\dataset\jsons",
-        "s3_url": "s3://testusman123/accounts/68db6b18bee4320874c73a71/project/68f109995dd0ed6524f76dcb/annotate/label/",
+        "s3_url": "s3://testusman123/accounts/68f7e3df3d12fbbeeae2d9be/project/68f7e4023d12fbbeeae2d9c0/annotate/label/",
         "file_extension": "*.json"
     }
 ]

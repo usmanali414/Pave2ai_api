@@ -65,11 +65,11 @@ class maskGenerate():
 
             thickness = int(data_2[i]['thickness'])
             if data_2[i]['type'] == 'Polygon':
-                print('drawing polygons')
+                # print('drawing polygons')
                 mask = self.draw_poly(mask, curr, colorCode)
 
             else:
-                print('drawing lines')
+                # print('drawing lines')
                 for k in range(len(curr)-1):
                     mask = cv2.line(mask, pt1=tuple(curr[k]), pt2=tuple(curr[k+1]), color=colorCode,\
                                      thickness= thickness )
@@ -79,8 +79,9 @@ class maskGenerate():
     def create_masks(self, inputPath, outPath,imgs_path):
 
         jsonfiles = glob.glob(os.path.join(inputPath,'*.json'))
-        print('Total files found: ',len(jsonfiles))
-        for file in jsonfiles:
+        logger.info(f'Processing {len(jsonfiles)} annotation files to generate masks')
+        
+        for file in tq(jsonfiles, desc="Generating masks"):
 
             try:
 
@@ -90,7 +91,7 @@ class maskGenerate():
                 file_name = os.path.split(file)[-1]
 
                 imgpath = os.path.join(imgs_path,file_name.replace('_mask.json', '.jpg'))
-                print(imgpath)
+                # print(imgpath)
                 img = cv2.imread(imgpath)
 
                 file_object = open(file)
@@ -98,12 +99,12 @@ class maskGenerate():
                 data_2 =  data['lsfs']['99']['objects']
                 #print(file_path)
                 mask = self.create_mask(data_2,img.shape)
-                print(np.unique(mask,return_counts=True))
+                # print(np.unique(mask,return_counts=True))
                 save_file_path = os.path.join(outPath, file_name.replace('json', 'png').replace('_mask', '') )
                 cv2.imwrite(save_file_path, mask)
 
             except Exception as e:
-                print(e)
+                logger.error(f"Error processing {file}: {e}")
                 continue
             
 
@@ -274,8 +275,11 @@ def Save_image_patches_for_training(img_mappings, target_dir, color_code):
 
     counter = np.int64(0)
     cs_temp = 0
-    for img_name_iter in tq(range(len(img_mappings))):
-        starttime = time.time() 
+    
+    # Progress bar for patch generation
+    subset_name = os.path.basename(target_dir)
+    for img_name_iter in tq(range(len(img_mappings)), desc=f"Generating {subset_name} patches"):
+        # starttime = time.time() 
         img = cv2.imread(img_mappings[img_name_iter][0])
         #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
         # print(img_mappings[img_name_iter][0])
@@ -306,7 +310,7 @@ def Save_image_patches_for_training(img_mappings, target_dir, color_code):
             try:
                 result = future.result()  # You could return something useful here
             except Exception as e:
-                print(f"An error occurred: {e}")
+                logger.error(f"Patch processing error: {e}")
         #print("time: ",time.time()-starttime )
 
 
@@ -352,8 +356,7 @@ class RIEGLPreprocessor:
         Returns:
             Tuple of (processed_images, generated_masks)
         """
-        logger.info(f"RIEGLPreprocessor.preprocess_images_and_annotations() method called")
-        logger.info(f"Processing {len(image_paths)} image-annotation pairs for project: {project_id}")
+        logger.info(f"Starting preprocessing for {len(image_paths)} image-annotation pairs")
         
         # Extract paths from the first pair to determine directory structure
         if image_paths and annotation_paths:
@@ -368,11 +371,7 @@ class RIEGLPreprocessor:
             orig_imgs_path = os.path.join(dataset_path,'orig_images')
             split_data_path = os.path.join(dataset_path,'split_patches_data')
             
-            logger.info(f"Dataset path: {dataset_path}")
-            logger.info(f"JSON folder path: {json_folder_path}")
-            logger.info(f"Original images path: {orig_imgs_path}")
-            logger.info(f"Output masks path: {outputpath}")
-            logger.info(f"Split patches data path: {split_data_path}")
+            logger.info(f"Dataset: {dataset_path}")
             
             # Step 1: Check directories and create masks
             check_dir_exists(json_folder_path, outputpath)
@@ -381,12 +380,14 @@ class RIEGLPreprocessor:
             start_time = time.time()
             
             # Step 2: Generate masks using the mask generator
+            logger.info("Step 1/2: Generating masks from annotations...")
             self.mask_generator.create_masks(json_folder_path, outputpath, orig_imgs_path)
             
             mask_generation_time = time.time() - start_time
-            logger.info(f"Mask generation completed in {mask_generation_time} seconds")
+            logger.info(f"✓ Masks generated in {mask_generation_time:.1f}s")
             
             # Step 3: Generate patches from masks (masks_to_patches functionality)
+            logger.info("Step 2/2: Converting masks to training patches...")
             patch_start_time = time.time()
             
             # Setup split patches data directory
@@ -416,11 +417,7 @@ class RIEGLPreprocessor:
             test_mappings = img_mask_mappings[train_cut+val_cut:]
             # test_mappings = img_mask_mappings[train_cut+val_cut:]x
             
-            logger.info(f"Total valid image-mask pairs: {len(img_mask_mappings)}")
-            
-            logger.info(f'Train Samples: {len(train_mappings)}')
-            logger.info(f'Val Samples: {len(val_mappings)}')
-            logger.info(f'Test Samples: {len(test_mappings)}')
+            logger.info(f"Data split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}")
             
             # Generate patches for each split
             target_dir = os.path.join(split_data_path,'train')
@@ -433,11 +430,11 @@ class RIEGLPreprocessor:
             Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
             
             patch_generation_time = time.time() - patch_start_time
-            logger.info(f"Patch generation completed in {patch_generation_time} seconds")
+            logger.info(f"✓ Patches generated in {patch_generation_time:.1f}s")
             
             # Calculate total time
             total_time = time.time() - start_time
-            logger.info(f"Total preprocessing completed in {total_time} seconds")
+            logger.info(f"✓ Preprocessing completed in {total_time:.1f}s")
             
         else:
             logger.warning("No image-annotation paths provided")
