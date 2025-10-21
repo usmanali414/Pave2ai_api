@@ -1,0 +1,673 @@
+{% extends "admin/base.html" %}
+{% block title %}Train Runs{% endblock %}
+{% block head %}
+<style>
+  .settings-container { max-width: 1200px; margin: 0 auto; }
+  .page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+  
+  /* Filters */
+  .filters { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+  .filter-field { display: flex; align-items: center; gap: 8px; }
+  .filter-field label { font-size: 13px; color: var(--muted); }
+  .filter-field select { height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+  
+  /* Train Run Cards */
+  .runs-grid { display: grid; gap: 16px; }
+  .run-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; transition: box-shadow 0.2s; }
+  .run-card:hover { box-shadow: 0 4px 12px rgba(108,92,231,0.1); }
+  
+  .run-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .run-id { font-size: 12px; color: var(--muted); font-family: monospace; }
+  .run-status-badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .run-status-badge.completed { background: #d1fae5; color: #065f46; }
+  .run-status-badge.failed { background: #fee2e2; color: #991b1b; }
+  .run-status-badge.training { background: #dbeafe; color: #1e40af; }
+  
+  /* Step Progress */
+  .steps-container { margin: 16px 0; }
+  .steps-title { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .steps { display: flex; gap: 8px; }
+  .step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .step-icon { 
+    width: 36px; height: 36px; border-radius: 50%; 
+    display: flex; align-items: center; justify-content: center; 
+    font-size: 16px; font-weight: 600; 
+    transition: all 0.3s; 
+    border: 2px solid transparent;
+    position: relative;
+  }
+  .step-icon.completed { 
+    background: #d1fae5; 
+    color: #065f46; 
+    border-color: #10b981;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+  }
+  .step-icon.failed { 
+    background: #fee2e2; 
+    color: #991b1b; 
+    border-color: #ef4444;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+  }
+  .step-icon.in_progress { 
+    background: #dbeafe; 
+    color: #1e40af; 
+    border-color: #3b82f6;
+    animation: pulse 2s infinite; 
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+  }
+  .step-icon.pending { 
+    background: #f3f4f6; 
+    color: #9ca3af; 
+    border-color: #d1d5db;
+    opacity: 0.6;
+  }
+  .step-label { 
+    font-size: 11px; 
+    color: var(--muted); 
+    text-align: center; 
+    font-weight: 500;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  
+  /* Actions */
+  .run-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .btn-resume { background: #f59e0b; border-color: #f59e0b; color: #fff; }
+  .btn-resume:hover { background: #d97706; }
+  .btn-view { background: #10b981; border-color: #10b981; color: #fff; }
+  .btn-view:hover { background: #059669; }
+  
+  /* Resume Info */
+  .resume-info { background: #fef3c7; border: 1px solid #fbbf24; border-radius: 8px; padding: 10px; margin-top: 12px; font-size: 13px; }
+  .resume-info strong { color: #92400e; }
+  
+  /* Dates */
+  .run-dates { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  
+  /* Empty State */
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty-state svg { width: 64px; height: 64px; margin: 0 auto 16px; opacity: 0.5; }
+  
+  /* Loading */
+  .spinner-container { display: flex; justify-content: center; padding: 40px; }
+  .spinner { width: 40px; height: 40px; border: 3px solid #e5e7eb; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  
+  /* S3 Info */
+  .s3-links { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  
+  /* Progress Indicators */
+  .progress-indicators { 
+    background: #f8fafc; 
+    border: 1px solid #e2e8f0; 
+    border-radius: 8px; 
+    padding: 16px; 
+    margin: 16px 0; 
+  }
+  .progress-indicators h4 { 
+    margin: 0 0 12px 0; 
+    font-size: 14px; 
+    color: #374151; 
+  }
+  .step-progress { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; 
+  }
+  .step { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 8px 12px; 
+    border: 1px solid #e5e7eb; 
+    border-radius: 6px; 
+    background: #ffffff; 
+    transition: all 0.3s ease; 
+  }
+  .step.completed { 
+    background: #d1fae5; 
+    border-color: #10b981; 
+  }
+  .step.in-progress { 
+    background: #dbeafe; 
+    border-color: #3b82f6; 
+    animation: pulse 2s infinite; 
+  }
+  .step.failed { 
+    background: #fee2e2; 
+    border-color: #ef4444; 
+  }
+  .step.pending { 
+    background: #f9fafb; 
+    border-color: #d1d5db; 
+  }
+  .step-name { 
+    font-weight: 500; 
+    font-size: 13px; 
+  }
+  .step-status { 
+    font-size: 16px; 
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="settings-container">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <div class="page-title" style="margin-bottom: 0;">Training Runs</div>
+    <a href="/admin/train-settings?sub=train" class="btn primary">+ Start New Training</a>
+  </div>
+  
+  <!-- Filters -->
+  <div class="filters">
+    <div class="filter-field">
+      <label>Project:</label>
+      <select id="project-filter" onchange="loadTrainRuns()">
+        <option value="">All Projects</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label>Status:</label>
+      <select id="status-filter" onchange="loadTrainRuns()">
+        <option value="">All Statuses</option>
+        <option value="completed">Completed</option>
+        <option value="failed">Failed</option>
+        <option value="training">In Progress</option>
+      </select>
+    </div>
+    <button class="btn" onclick="resetFilters()">Reset</button>
+  </div>
+  
+  <!-- Loading State -->
+  <div id="loading-state" class="spinner-container" style="display: none;">
+    <div class="spinner"></div>
+  </div>
+  
+  <!-- Train Runs Grid -->
+  <div id="runs-grid" class="runs-grid"></div>
+  
+  <!-- Empty State -->
+  <div id="empty-state" class="empty-state" style="display: none;">
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    <div>No training runs found</div>
+  </div>
+  
+  <!-- Progress Indicators -->
+  <div class="progress-indicators" id="progress-indicators" style="display: none;">
+    <h4>Training Progress</h4>
+    <div class="step-progress">
+      <div class="step" id="step-loading_data">
+        <span class="step-name">Loading Data</span>
+        <span class="step-status">⏳</span>
+      </div>
+      <div class="step" id="step-preprocessing">
+        <span class="step-name">Preprocessing</span>
+        <span class="step-status">⏳</span>
+      </div>
+      <div class="step" id="step-training">
+        <span class="step-name">Training</span>
+        <span class="step-status">⏳</span>
+      </div>
+      <div class="step" id="step-saving_model">
+        <span class="step-name">Saving Model</span>
+        <span class="step-status">⏳</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var currentRuns = [];
+  
+  // Load projects for filter
+  function loadProjects(){
+    fetch('/project')
+      .then(function(r){ return r.json(); })
+      .then(function(list){
+        var sel = document.getElementById('project-filter');
+        sel.innerHTML = '<option value="">All Projects</option>';
+        (list||[]).forEach(function(p){
+          var opt = document.createElement('option');
+          opt.value = p._id || p.id;
+          opt.textContent = p.name;
+          sel.appendChild(opt);
+        });
+      }).catch(function(e){ console.error('Load projects failed', e); });
+  }
+  
+  // Load train runs
+  window.loadTrainRuns = function(){
+    var projectId = document.getElementById('project-filter').value;
+    var status = document.getElementById('status-filter').value;
+    
+    var query = [];
+    if (projectId) query.push('project_id=' + encodeURIComponent(projectId));
+    if (status) query.push('status=' + encodeURIComponent(status));
+    
+    var url = '/train-runs' + (query.length ? '?' + query.join('&') : '');
+    
+    document.getElementById('loading-state').style.display = 'flex';
+    document.getElementById('runs-grid').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'none';
+    
+    console.log('Loading training runs from:', url);
+    fetch(url)
+      .then(function(r){ 
+        console.log('Response status:', r.status);
+        if (!r.ok) throw new Error('Failed to load runs - Status: ' + r.status); 
+        return r.json(); 
+      })
+      .then(function(runs){
+        console.log('Loaded training runs:', runs);
+        currentRuns = runs;
+        renderTrainRuns(runs);
+      })
+      .catch(function(e){
+        console.error('Load train runs failed', e);
+        showToast('Failed to load training runs: ' + e.message, 'error');
+        document.getElementById('loading-state').style.display = 'none';
+        document.getElementById('empty-state').style.display = 'block';
+      });
+  };
+  
+  // Render train runs
+  function renderTrainRuns(runs){
+    var grid = document.getElementById('runs-grid');
+    var emptyState = document.getElementById('empty-state');
+    var loadingState = document.getElementById('loading-state');
+    
+    loadingState.style.display = 'none';
+    
+    if (!runs || runs.length === 0){
+      grid.style.display = 'none';
+      emptyState.style.display = 'block';
+      return;
+    }
+    
+    grid.style.display = 'grid';
+    emptyState.style.display = 'none';
+    grid.innerHTML = '';
+    
+    runs.forEach(function(run){
+      var card = createRunCard(run);
+      grid.appendChild(card);
+    });
+  }
+  
+  // Create run card
+  function createRunCard(run){
+    var card = document.createElement('div');
+    card.className = 'run-card';
+    
+    var statusClass = run.status || 'unknown';
+    var statusText = (run.status || 'unknown').toUpperCase();
+    
+    // Header
+    var header = document.createElement('div');
+    header.className = 'run-header';
+    header.innerHTML = '<div class="run-id">Run ID: ' + (run._id || 'N/A') + '</div>' +
+                       '<span class="run-status-badge ' + statusClass + '">' + statusText + '</span>';
+                       
+    card.appendChild(header);
+    
+    // Steps Progress
+    var stepsContainer = document.createElement('div');
+    stepsContainer.className = 'steps-container';
+    stepsContainer.innerHTML = '<div class="steps-title">Pipeline Progress</div>';
+    
+    var steps = document.createElement('div');
+    steps.className = 'steps';
+    
+    var stepNames = [
+      { key: 'loading_data', label: 'Load Data', icon: '📥' },
+      { key: 'preprocessing', label: 'Preprocess', icon: '⚙️' },
+      { key: 'training', label: 'Training', icon: '🧠' },
+      { key: 'saving_model', label: 'Save Model', icon: '💾' }
+    ];
+    
+    var stepStatus = run.step_status || {};
+    var overallStatus = run.status || 'unknown';
+    var firstFailedStep = null;
+    var hasReachedStep = false;
+    
+    // Determine the first failed step and overall progress
+    stepNames.forEach(function(s, index){
+      var status = stepStatus[s.key] || 'pending';
+      
+      // Track first failed step
+      if (status === 'failed' && !firstFailedStep) {
+        firstFailedStep = s.key;
+      }
+      
+      // Track if we've reached this step
+      if (status !== 'pending') {
+        hasReachedStep = true;
+      }
+    });
+    
+    // Render steps with proper status colors
+    stepNames.forEach(function(s, index){
+      var status = stepStatus[s.key] || 'pending';
+      
+      // Determine visual status for each step
+      var visualStatus = 'pending'; // Default gray for unreached
+      
+      if (status === 'completed') {
+        visualStatus = 'completed'; // Green
+      } else if (status === 'failed') {
+        visualStatus = 'failed'; // Red
+      } else if (status === 'in_progress') {
+        visualStatus = 'in_progress'; // Blue with animation
+      } else if (status === 'pending') {
+        // If overall run failed and we haven't reached this step yet, show as unreached (gray)
+        if (overallStatus === 'failed' && !hasReachedStep) {
+          visualStatus = 'pending'; // Gray
+        } else if (overallStatus === 'completed' && index > 0) {
+          // If run completed but this step wasn't explicitly marked, assume it was completed
+          visualStatus = 'completed'; // Green
+        } else {
+          visualStatus = 'pending'; // Gray
+        }
+      }
+      
+      var step = document.createElement('div');
+      step.className = 'step';
+      step.innerHTML = '<div class="step-icon ' + visualStatus + '">' + s.icon + '</div>' +
+                       '<div class="step-label">' + s.label + '</div>';
+      steps.appendChild(step);
+    });
+    
+    stepsContainer.appendChild(steps);
+    card.appendChild(stepsContainer);
+    
+    // Resume Info
+    var resumeInfo = run.resume_info || {};
+    if (resumeInfo.can_resume && run.status === 'failed'){
+      var info = document.createElement('div');
+      info.className = 'resume-info';
+      info.innerHTML = '<strong>⚠️ Failed at:</strong> ' + (resumeInfo.resume_from_step || 'unknown') +
+                       '<br><strong>Reason:</strong> ' + (resumeInfo.resume_reason || 'N/A');
+      if (resumeInfo.resume_count > 0){
+        info.innerHTML += '<br><strong>Resume count:</strong> ' + resumeInfo.resume_count;
+      }
+      card.appendChild(info);
+    }
+    
+    // S3 Info (display but not clickable for now)
+    if (run.status === 'completed'){
+      var s3Info = document.createElement('div');
+      s3Info.className = 's3-links';
+      s3Info.style.color = '#6b7280';
+      s3Info.style.fontSize = '12px';
+      var info = [];
+      if (run.output_weights_s3_url){
+        info.push('📦 Model Weights Saved');
+      }
+      if (run.output_logs_s3_url){
+        info.push('📊 Training Logs Saved');
+      }
+      if (run.evaluation_logs_s3_url){
+        info.push('📈 Evaluation Results Saved');
+      }
+      if (info.length > 0){
+        s3Info.innerHTML = info.join(' | ');
+        card.appendChild(s3Info);
+      }
+    }
+    
+    // Dates
+    var dates = document.createElement('div');
+    dates.className = 'run-dates';
+    dates.innerHTML = 'Created: ' + formatDate(run.created_at) +
+                      ' | Updated: ' + formatDate(run.updated_at);
+    card.appendChild(dates);
+    
+    // Actions
+    var actions = document.createElement('div');
+    actions.className = 'run-actions';
+    
+    if (run.status === 'completed'){
+      actions.innerHTML = '<button class="btn btn-view" disabled>✓ Completed</button>';
+    } else if (run.status === 'failed'){
+      // Determine resume step from step_status
+      var resumeStep = 'failed step';
+      var stepStatus = run.step_status || {};
+      var steps = ['loading_data', 'preprocessing', 'training', 'saving_model'];
+      
+      for (var i = 0; i < steps.length; i++) {
+        var step = steps[i];
+        var stepInfo = stepStatus[step] || {};
+        var status = 'pending';
+        
+        if (typeof stepInfo === 'string') {
+          status = stepInfo;
+        } else if (typeof stepInfo === 'object' && stepInfo !== null) {
+          status = stepInfo.status || 'pending';
+        }
+        
+        if (status === 'failed' || status === 'in_progress') {
+          resumeStep = step.replace('_', ' ');
+          break;
+        }
+      }
+      
+      actions.innerHTML = '<button class="btn btn-resume" onclick="resumeTraining(\'' + (run._id || run.train_run_id) + '\')">↻ Resume from ' + resumeStep + '</button>';
+    } else if (run.status === 'training' || run.status === 'resuming'){
+      var statusText = run.status === 'resuming' ? 'Resuming...' : 'Training in progress...';
+      actions.innerHTML = '<button class="btn primary" disabled>⟳ ' + statusText + '</button>';
+    } else {
+      // Unknown status - show status
+      actions.innerHTML = '<button class="btn" disabled>Status: ' + (run.status || 'unknown') + '</button>';
+    }
+    
+    card.appendChild(actions);
+    
+    return card;
+  }
+  
+  // Resume training
+  window.resumeTraining = function(runId){
+    console.log('Attempting to resume training for runId:', runId);
+    if (!confirm('Resume training from the failed step?')) return;
+    
+    showToast('Resuming training...', 'success');
+    
+    var url = '/train/resume/' + encodeURIComponent(runId);
+    console.log('Resume URL:', url);
+    
+    fetch(url, { method: 'POST' })
+      .then(function(r){
+        console.log('Resume response status:', r.status);
+        if (r.status === 409){
+          return r.json().then(function(j){
+            showToast(j.detail || 'Cannot resume - check status', 'error');
+          });
+        }
+        if (!r.ok){
+          return r.json().then(function(j){
+            throw new Error(j.detail || 'Failed to resume training');
+          });
+        }
+        return r.json();
+      })
+      .then(function(data){
+        console.log('Resume response data:', data);
+        if (!data) return;
+        showToast('Training resumed successfully!', 'success');
+        setTimeout(function(){ loadTrainRuns(); }, 1000);
+      })
+      .catch(function(e){
+        console.error('Resume failed:', e);
+        showToast(e.message || 'Failed to resume', 'error');
+      });
+  };
+
+  // Get training runs for a specific config
+  window.getTrainingRunsForConfig = function(configId){
+    return fetch('/train/runs/' + encodeURIComponent(configId))
+      .then(function(r){
+        if (!r.ok){
+          throw new Error('Failed to load training runs');
+        }
+        return r.json();
+      });
+  };
+
+  // Create new training
+  window.createNewTraining = function(configId){
+    if (!confirm('Create new training with this configuration?')) return;
+    
+    showToast('Starting new training...', 'success');
+    
+    fetch('/train/' + encodeURIComponent(configId), { method: 'POST' })
+      .then(function(r){
+        if (r.status === 409){
+          return r.json().then(function(j){
+            showToast(j.detail || 'Training already running', 'error');
+          });
+        }
+        if (!r.ok){
+          return r.json().then(function(j){
+            throw new Error(j.detail || 'Failed to start training');
+          });
+        }
+        return r.json();
+      })
+      .then(function(data){
+        if (!data) return;
+        showToast('New training started successfully!', 'success');
+        setTimeout(function(){ loadTrainRuns(); }, 1000);
+      })
+      .catch(function(e){
+        showToast(e.message || 'Failed to start training', 'error');
+      });
+  };
+  
+  // Reset filters
+  window.resetFilters = function(){
+    document.getElementById('project-filter').value = '';
+    document.getElementById('status-filter').value = '';
+    loadTrainRuns();
+  };
+  
+  // Format date
+  function formatDate(dateStr){
+    if (!dateStr) return 'N/A';
+    try {
+      var d = new Date(dateStr);
+      return d.toLocaleString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch(e){
+      return dateStr;
+    }
+  }
+  
+  // Update progress indicators for a specific run
+  function updateProgressIndicators(runId) {
+    fetch('/train/status/' + encodeURIComponent(runId))
+      .then(function(r) {
+        if (!r.ok) return;
+        return r.json();
+      })
+      .then(function(data) {
+        if (!data) return;
+        
+        var stepStatus = data.step_status || {};
+        var steps = ['loading_data', 'preprocessing', 'training', 'saving_model'];
+        
+        steps.forEach(function(step) {
+          var stepElement = document.getElementById('step-' + step);
+          if (!stepElement) return;
+          
+          var statusElement = stepElement.querySelector('.step-status');
+          var stepInfo = stepStatus[step] || {};
+          var status = 'pending';
+          
+          // Handle both old format (string) and new format (object)
+          if (typeof stepInfo === 'string') {
+            status = stepInfo;
+          } else if (typeof stepInfo === 'object' && stepInfo !== null) {
+            status = stepInfo.status || 'pending';
+          }
+          
+          stepElement.className = 'step';
+          statusElement.textContent = '⏳';
+          
+          if (status === 'completed') {
+            stepElement.classList.add('completed');
+            statusElement.textContent = '✅';
+          } else if (status === 'in_progress') {
+            stepElement.classList.add('in-progress');
+            statusElement.textContent = '🔄';
+          } else if (status === 'failed') {
+            stepElement.classList.add('failed');
+            statusElement.textContent = '❌';
+          } else {
+            stepElement.classList.add('pending');
+            statusElement.textContent = '⏳';
+          }
+        });
+        
+        // Show progress indicators if any step is in progress
+        var hasInProgress = steps.some(function(step) {
+          var stepInfo = stepStatus[step] || {};
+          var status = 'pending';
+          if (typeof stepInfo === 'string') {
+            status = stepInfo;
+          } else if (typeof stepInfo === 'object' && stepInfo !== null) {
+            status = stepInfo.status || 'pending';
+          }
+          return status === 'in_progress';
+        });
+        
+        if (hasInProgress) {
+          document.getElementById('progress-indicators').style.display = 'block';
+        } else {
+          document.getElementById('progress-indicators').style.display = 'none';
+        }
+      })
+      .catch(function(e) {
+        console.error('Error updating progress:', e);
+      });
+  }
+
+  // Auto-refresh for in-progress runs
+  function autoRefresh(){
+    var hasInProgress = currentRuns.some(function(r){ 
+      return r.status === 'training' || r.status === 'resuming'; 
+    });
+    if (hasInProgress){
+      setTimeout(function(){ 
+        loadTrainRuns(); 
+        // Update progress for in-progress runs
+        currentRuns.forEach(function(run) {
+          if (run.status === 'training' || run.status === 'resuming') {
+            updateProgressIndicators(run._id || run.train_run_id);
+          }
+        });
+      }, 10000); // Refresh every 10 seconds
+    }
+  }
+  
+  // Initial load
+  loadProjects();
+  loadTrainRuns();
+  
+  // Set up auto-refresh
+  setInterval(function(){
+    autoRefresh();
+  }, 10000);
+})();
+</script>
+{% endblock %}
+

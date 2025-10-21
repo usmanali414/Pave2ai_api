@@ -36,7 +36,200 @@ class AMCNNOrchestrator:
         self.data_parser = None
         self.model = None
         self.train_run_id = None
-    
+
+    async def execute_training_with_resume(self, train_config_id: str, train_run_id: str = None, resume_from: str = None) -> Dict[str, Any]:
+        """
+        Execute training with resume capability.
+        
+        Args:
+            train_config_id: Training configuration ID
+            train_run_id: Training run ID
+            resume_from: Step to resume from
+            
+        Returns:
+            Training results
+        """
+        try:
+            logger.info(f"Starting AMCNN training pipeline with resume - config: {train_config_id}, run: {train_run_id}, resume_from: {resume_from}")
+            
+            self.train_run_id = train_run_id
+            self.train_config = await self._load_train_config(train_config_id)
+            self.bucket_config = await self._load_bucket_config(self.train_config["project_id"])
+            
+            # Load existing run to get current step status
+            db = mongo_client.database
+            train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            existing_run = await train_runs.find_one({"_id": ObjectId(train_run_id)})
+            if not existing_run:
+                raise ValueError(f"Training run not found: {train_run_id}")
+            step_status = existing_run.get("step_status", {})
+            
+            # Execute steps based on resume point - skip completed steps
+            loading_data_status = self._get_step_status(step_status, "loading_data")
+            preprocessing_status = self._get_step_status(step_status, "preprocessing")
+            training_status = self._get_step_status(step_status, "training")
+            saving_model_status = self._get_step_status(step_status, "saving_model")
+            
+            logger.info(f"Step statuses - loading_data: {loading_data_status}, preprocessing: {preprocessing_status}, training: {training_status}, saving_model: {saving_model_status}")
+            
+            # Only execute loading_data if it's not completed
+            if loading_data_status != "completed":
+                logger.info("Executing loading_data step")
+                await self._execute_loading_data_step()
+            else:
+                logger.info("Skipping loading_data step - already completed")
+            
+            # Only execute preprocessing if it's not completed
+            if preprocessing_status != "completed":
+                logger.info("Executing preprocessing step")
+                await self._execute_preprocessing_step()
+            else:
+                logger.info("Skipping preprocessing step - already completed")
+            
+            # Only execute training if it's not completed
+            if training_status != "completed":
+                logger.info("Executing training step")
+                await self._execute_training_step()
+            else:
+                logger.info("Skipping training step - already completed")
+            
+            # Only execute saving_model if it's not completed
+            if saving_model_status != "completed":
+                logger.info("Executing saving_model step")
+                await self._execute_saving_model_step()
+            else:
+                logger.info("Skipping saving_model step - already completed")
+            
+            # Update final status
+            await self._update_train_run_final_status(train_run_id, "completed")
+            logger.info(f"Training pipeline completed with resume - run: {train_run_id}")
+            
+            return {
+                "status": "completed",
+                "train_run_id": self.train_run_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in AMCNN training pipeline with resume: {str(e)}")
+            await self._update_train_run_final_status(train_run_id, "failed")
+            raise
+
+    def _get_step_status(self, step_status: Dict[str, Any], step: str) -> str:
+        """Get step status - simple string format."""
+        return step_status.get(step, "pending")
+
+    async def _execute_loading_data_step(self):
+        """Execute loading_data step with proper status tracking."""
+        try:
+            await self._update_train_run_status(self.train_run_id, "loading_data", "in_progress")
+            
+            components = await self._load_training_components(self.train_config)
+            self.data_parser = components["data_parser"]
+            self.model = components["model"]
+
+            transferred_data = await self.data_parser.load_data(self.train_config)
+            if not self.data_parser.validate_transferred_data(transferred_data):
+                raise ValueError("Data validation failed")
+            
+            await self._update_train_run_status(self.train_run_id, "loading_data", "completed")
+            
+        except Exception as e:
+            await self._update_train_run_status(self.train_run_id, "loading_data", "failed")
+            raise
+
+
+    async def _execute_preprocessing_step(self):
+        """Execute preprocessing step with proper status tracking."""
+        try:
+            await self._update_train_run_status(self.train_run_id, "preprocessing", "in_progress")
+            
+            # Only load data if not already loaded (loading_data step was skipped)
+            if not hasattr(self, 'data_parser') or not self.data_parser:
+                logger.info("Loading data for preprocessing step")
+                components = await self._load_training_components(self.train_config)
+                self.data_parser = components["data_parser"]
+                transferred_data = await self.data_parser.load_data(self.train_config)
+            else:
+                logger.info("Using already loaded data for preprocessing step")
+                # Data is already loaded, just get the transferred data info
+                transferred_data = await self.data_parser.load_data(self.train_config)
+            
+            model_version = self.train_config.get("model_version", "v1")
+            await self._run_amcnn_preprocessor(transferred_data, model_version)
+            
+            await self._update_train_run_status(self.train_run_id, "preprocessing", "completed")
+            
+        except Exception as e:
+            await self._update_train_run_status(self.train_run_id, "preprocessing", "failed")
+            raise
+
+    async def _execute_training_step(self):
+        """Execute training step with proper status tracking."""
+        try:
+            await self._update_train_run_status(self.train_run_id, "training", "in_progress")
+            
+            # Reload model if needed
+            if not hasattr(self, 'model') or not self.model:
+                components = await self._load_training_components(self.train_config)
+                self.model = components["model"]
+            
+            # Prepare training config
+            training_config = self.train_config.get("metadata", {})
+            training_config["dataset_path"] = self._get_dataset_path()
+            training_config["logs_output_path"] = self._get_logs_output_path()
+            training_config["load_initial_weights"] = self.train_config.get("metadata", {}).get("initial_weights", False)
+            training_config["initial_weights_path"] = self._get_initial_weights_path()
+            
+            training_results = self.model.train(training_config)
+            if training_results["status"] != "completed":
+                raise RuntimeError("Failed to train model")
+            
+            await self._update_train_run_status(self.train_run_id, "training", "completed")
+            
+        except Exception as e:
+            await self._update_train_run_status(self.train_run_id, "training", "failed")
+            raise
+
+    async def _execute_saving_model_step(self):
+        """Execute saving_model step with proper status tracking."""
+        try:
+            await self._update_train_run_status(self.train_run_id, "saving_model", "in_progress")
+            
+            # Reload model if needed
+            if not hasattr(self, 'model') or not self.model:
+                components = await self._load_training_components(self.train_config)
+                self.model = components["model"]
+            
+            weights_path = self._get_weights_output_path()
+            if not self.model.save_weights(weights_path):
+                raise RuntimeError("Failed to save model weights")
+            
+            await self._update_train_run_status(self.train_run_id, "saving_model", "completed")
+            
+            # Update S3 URLs and results
+            input_weights_url = self._get_initial_weights_path() + "/dummy_model_weights.h5"
+            output_logs_url = self._get_logs_output_path()
+            await self._update_train_run_s3_urls(self.train_run_id, input_weights_url, weights_path, output_logs_url)
+            
+            # Save training logs CSV URL
+            training_logs_csv_url = f"{output_logs_url}/experiment1_accumulated_checkpointV1.csv"
+            await self._update_train_run_results(self.train_run_id, training_logs_csv_url, "training")
+            
+            # Run evaluation
+            eval_results = self.model.evaluate(
+                dataset_path=self._get_dataset_path(),
+                eval_weights_s3_url=weights_path,
+                eval_logs_s3_url=output_logs_url
+            )
+
+            if eval_results.get("status") == "completed":
+                evaluation_logs_csv_url = f"{output_logs_url}/evaluation_results.csv"
+                await self._update_train_run_results(self.train_run_id, evaluation_logs_csv_url, "evaluation")
+            
+        except Exception as e:
+            await self._update_train_run_status(self.train_run_id, "saving_model", "failed")
+            raise
+
     async def execute_training(self, train_config_id: str, train_run_id: str = None) -> Dict[str, Any]:
 
         try:
@@ -390,10 +583,13 @@ class AMCNNOrchestrator:
             # Convert string train_run_id to ObjectId
             run_id = ObjectId(train_run_id)
             
+            # Simple step_status structure - just the status string
+            now = datetime.utcnow()
+            
             # Update step_status
             update_data = {
                 f"step_status.{step}": status,
-                "updated_at": datetime.utcnow()
+                "updated_at": now
             }
             
             await train_runs.update_one(
@@ -422,6 +618,10 @@ class AMCNNOrchestrator:
                 "updated_at": datetime.utcnow(),
                 "ended_at": datetime.utcnow()
             }
+            
+            # Clear error field if training completed successfully
+            if final_status == "completed":
+                update_data["error"] = ""
             
             await train_runs.update_one(
                 {"_id": run_id},
@@ -506,4 +706,18 @@ async def run_amcnn_training(train_config_id: str, train_run_id: str = None) -> 
     orchestrator = AMCNNOrchestrator()
     return await orchestrator.execute_training(train_config_id, train_run_id)
 
+async def run_amcnn_training_with_resume(train_config_id: str, train_run_id: str = None, resume_from: str = None) -> Dict[str, Any]:
+    """
+    Run AMCNN training with resume capability.
+    
+    Args:
+        train_config_id: ID of the train configuration
+        train_run_id: ID of the train run record
+        resume_from: Step to resume from
+        
+    Returns:
+        Training results
+    """
+    orchestrator = AMCNNOrchestrator()
+    return await orchestrator.execute_training_with_resume(train_config_id, train_run_id, resume_from)
 

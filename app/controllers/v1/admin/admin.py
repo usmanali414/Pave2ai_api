@@ -176,3 +176,11 @@ async def admin_train_settings(request: Request):
     sub = request.query_params.get("sub", "create")
     return templates.TemplateResponse("training_management/train_settings.html", {"request": request, "sub": sub})
 
+
+@router.get("/admin/train-runs", response_class=HTMLResponse)
+async def admin_train_runs(request: Request):
+    try:
+        _require_admin_cookie(request)
+    except HTTPException:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    return templates.TemplateResponse("training_management/train_runs.html", {"request": request})

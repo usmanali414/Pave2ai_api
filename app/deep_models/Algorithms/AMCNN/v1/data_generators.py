@@ -57,26 +57,37 @@ class DataGen(Sequence):
     
     def read_imagesPath_list(self):
         basepath = os.path.join(self.dataset_dir,self.subset)
-        print(f"Looking for data in: {basepath}")
+        # print(f"Looking for data in: {basepath}")
         
         total_files_found = 0
+        class_counts = {}
         for key1 in list(self.class_folder_names_dict.keys()):
             class_path = os.path.join(basepath,key1,'*.npz')
-            print(f"Looking for files in: {class_path}")
+            # print(f"Looking for files in: {class_path}")
             
             class_imgs_list = glob.glob(class_path)
-            print(f"Found {len(class_imgs_list)} files in class {key1}")
+            # print(f"Found {len(class_imgs_list)} files in class {key1}")
             
             if self.subset == 'train' and str(key1) == '0':
                 cutt_tokeep = len(class_imgs_list)/4
                 class_imgs_list  = class_imgs_list[:int(cutt_tokeep)]
-                print(f"Reduced to {len(class_imgs_list)} files for training class 0")
+                # print(f"Reduced to {len(class_imgs_list)} files for training class 0")
             
             self.images_path.extend(class_imgs_list)
             self.labels.extend([int(self.class_folder_names_dict[key1])]  * int(len(class_imgs_list)) )
             total_files_found += len(class_imgs_list)
+            class_counts[key1] = len(class_imgs_list)
         
-        print(f"Total files found for {self.subset}: {total_files_found}")
+        # print(f"Total files found for {self.subset}: {total_files_found}")
+        
+        # Show validation classes path
+        if self.subset == 'val':
+            print(f"Validation classes path: {basepath}")
+        
+        # Show summary for train and val sets
+        if self.subset in ['train', 'val']:
+            class_summary = ', '.join([f"class {k}: {v} patches" for k, v in class_counts.items() if v > 0])
+            print(f"{self.subset.capitalize()} set - {class_summary}")
         
     def on_epoch_end(self):
         # random.shuffle(self.images_path)

@@ -86,6 +86,7 @@
             <div id="tm-submenu" class="submenu">
               <a id="tm-create" href="/admin/train-settings?sub=create">Create Configurations</a>
               <a id="tm-train" href="/admin/train-settings?sub=train">Training</a>
+              <a id="tm-runs" href="/admin/train-runs">Training Runs</a>
             </div>
           </div>
         </nav>
@@ -174,13 +175,17 @@
               if (p) p.classList.add('primary');
             }
           }
-          if (path.startsWith('/admin/train-settings')) {
+          if (path.startsWith('/admin/train-settings') || path.startsWith('/admin/train-runs')) {
             var sm2 = document.getElementById('tm-submenu');
             if (sm2) sm2.classList.add('show');
-            var p2 = new URLSearchParams(location.search);
-            var sub2 = p2.get('sub');
-            if (sub2 === 'train') { var t2 = document.getElementById('tm-train'); if (t2) t2.classList.add('primary'); }
-            else { var c2 = document.getElementById('tm-create'); if (c2) c2.classList.add('primary'); }
+            if (path.startsWith('/admin/train-runs')) {
+              var r = document.getElementById('tm-runs'); if (r) r.classList.add('primary');
+            } else {
+              var p2 = new URLSearchParams(location.search);
+              var sub2 = p2.get('sub');
+              if (sub2 === 'train') { var t2 = document.getElementById('tm-train'); if (t2) t2.classList.add('primary'); }
+              else { var c2 = document.getElementById('tm-create'); if (c2) c2.classList.add('primary'); }
+            }
           }
         } catch(e) {}
       })();
