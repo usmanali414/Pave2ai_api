@@ -35,7 +35,7 @@ class RIEGL_PARSER():
                 full_path = base_path / relative_path
                 full_path.mkdir(parents=True, exist_ok=True)
                 directories[key] = full_path
-                logger.info(f"Setup directory: {key} -> {full_path}")
+                # logger.info(f"Setup directory: {key} -> {full_path}")
             
         return directories
     
@@ -49,7 +49,7 @@ class RIEGL_PARSER():
         Returns:
             Dictionary containing transfer results and local paths
         """
-        logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
+        # logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
         
         try:
             # Get project info from train config

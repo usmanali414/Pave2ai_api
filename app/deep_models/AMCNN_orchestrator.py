@@ -52,7 +52,7 @@ class AMCNNOrchestrator:
             Training results
         """
         try:
-            logger.info(f"Starting AMCNN training pipeline with resume - config: {train_config_id}, run: {train_run_id}, resume_from: {resume_from}")
+            # logger.info(f"Starting AMCNN training pipeline with resume - config: {train_config_id}, run: {train_run_id}, resume_from: {resume_from}")
             
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
@@ -82,7 +82,7 @@ class AMCNNOrchestrator:
                 status = self._get_step_status(step_status, step_name)
                 if status not in ["completed"]:
                     resume_from_index = i
-                    logger.info(f"Resuming from step: {step_name} (status: {status})")
+                    # logger.info(f"Resuming from step: {step_name} (status: {status})")
                     break
             
             if resume_from_index is None:
@@ -95,18 +95,18 @@ class AMCNNOrchestrator:
             # Execute steps starting from the resume point
             for i, (step_name, step_function) in enumerate(steps):
                 if i < resume_from_index:
-                    logger.info(f"Skipping {step_name} step - already completed")
+                    # logger.info(f"Skipping {step_name} step - already completed")
                     continue
                 elif i == resume_from_index:
-                    logger.info(f"Executing {step_name} step - resuming from here")
+                    # logger.info(f"Executing {step_name} step - resuming from here")
                     await step_function()
                 else:
-                    logger.info(f"Executing {step_name} step - continuing pipeline")
+                    # logger.info(f"Executing {step_name} step - continuing pipeline")
                     await step_function()
             
             # Update final status
             await self._update_train_run_final_status(train_run_id, "completed")
-            logger.info(f"Training pipeline completed with resume - run: {train_run_id}")
+            # logger.info(f"Training pipeline completed with resume - run: {train_run_id}")
             
             return {
                 "status": "completed",
@@ -243,7 +243,7 @@ class AMCNNOrchestrator:
             
             # ✅ Clean up incomplete preprocessing data before re-running
             if os.path.exists(local_patches_path):
-                logger.info(f"Cleaning up incomplete preprocessing data at {local_patches_path}")
+                # logger.info(f"Cleaning up incomplete preprocessing data at {local_patches_path}")
                 import shutil
                 shutil.rmtree(local_patches_path)
             
@@ -286,7 +286,7 @@ class AMCNNOrchestrator:
                     }
                 }
                 
-                logger.info(f"  - Built file lists: {len(image_files)} images, {len(json_files)} annotations")
+                # logger.info(f"  - Built file lists: {len(image_files)} images, {len(json_files)} annotations")
             else:
                 # Data doesn't exist locally - need to download
                 logger.info("Raw data not found locally - downloading from S3...")
@@ -298,7 +298,7 @@ class AMCNNOrchestrator:
                 transferred_data = await self.data_parser.load_data(self.train_config)
             
             # Run preprocessing
-            logger.info("Running AMCNN preprocessor...")
+            # logger.info("Running AMCNN preprocessor...")
             model_version = self.train_config.get("model_version", "v1")
             await self._run_amcnn_preprocessor(transferred_data, model_version)
             
@@ -406,7 +406,7 @@ class AMCNNOrchestrator:
     async def execute_training(self, train_config_id: str, train_run_id: str = None) -> Dict[str, Any]:
 
         try:
-            logger.info(f"Starting AMCNN training pipeline - config: {train_config_id}, run: {train_run_id}")
+            # logger.info(f"Starting AMCNN training pipeline - config: {train_config_id}, run: {train_run_id}")
             
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
@@ -669,7 +669,7 @@ class AMCNNOrchestrator:
             model_name = normalize_component_name(train_config["metadata"].get("model_name"))
             model_version = normalize_component_name(train_config.get("model_version"))
             
-            logger.info(f"Loading {parser_name} parser and {model_name} {model_version}")
+            # logger.info(f"Loading {parser_name} parser and {model_name} {model_version}")
             
             # Load data parser using exact parser name
             data_parser = await self._load_component_dynamic(

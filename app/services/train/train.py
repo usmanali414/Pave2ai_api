@@ -96,7 +96,7 @@ async def resume_training(train_run_id: str) -> Dict[str, Any]:
         # Start resume process
         asyncio.create_task(_run_resume_training(run, resume_from))
         
-        logger.info(f"Training resume started for run {train_run_id} from step: {resume_from}")
+        # logger.info(f"Training resume started for run {train_run_id} from step: {resume_from}")
         
         return {
             "train_run_id": train_run_id,
@@ -151,7 +151,7 @@ async def _run_resume_training(run: Dict[str, Any], resume_from: str) -> None:
             {
                 "$set": {
                     "status": "completed",
-                    "results": orchestrator_result,
+                    # "results": orchestrator_result,
                     "updated_at": datetime.utcnow(),
                     "ended_at": datetime.utcnow()
                 }
@@ -577,7 +577,7 @@ async def _run_orchestrator(train_config: Dict[str, Any], train_run_id: str) -> 
             
             # Call the orchestrator function with both train_config_id and train_run_id
             result = await orchestrator_function(train_config_id, train_run_id)
-            logger.info(f"{model_name} orchestrator completed successfully")
+            # logger.info(f"{model_name} orchestrator completed successfully")
             return result
             
         except (ImportError, AttributeError) as e:

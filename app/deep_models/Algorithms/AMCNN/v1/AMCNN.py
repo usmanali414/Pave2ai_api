@@ -101,7 +101,7 @@ class AMCNN():
             initial_weights_path = config.get('initial_weights_path', '')
             
             if load_initial_weights:
-                logger.info(f"Loading initial weights from S3: {initial_weights_path}")
+                logger.info("Loading initial weights from S3")
                 if not self._load_weights_from_s3(initial_weights_path):
                     logger.info("Creating new initial weights")
                     self._create_and_upload_initial_weights(initial_weights_path)
@@ -114,7 +114,7 @@ class AMCNN():
             if logs_output_path:
                 # Create local temp directory for logs
                 modelpath = tempfile.mkdtemp(prefix='amcnn_logs_')
-                logger.info(f'Created temp model folder at {modelpath}')
+                # logger.info(f'Created temp model folder at {modelpath}')
                     
                 model_checkpoint_name = os.path.join(modelpath, self.training_configs.modelname + '.h5')
                 csv_checkpoint_name = os.path.join(modelpath, self.training_configs.modelname + '.csv')
@@ -261,7 +261,7 @@ class AMCNN():
     def _load_weights_from_s3(self, weights_path: str) -> bool:
         """Load model weights from S3."""
         try:
-            logger.info(f"Loading weights from S3: {weights_path}")
+            # logger.info(f"Loading weights from S3: {weights_path}")
             
             s3_result = self.s3_operations.list_files(weights_path)
             
@@ -284,7 +284,7 @@ class AMCNN():
                 if weight_files:
                     h5_files = weight_files
                 else:
-                    logger.warning(f"No weight files in S3: {weights_path}")
+                    logger.warning("No weight files in S3")
                     return False
             
             # Use the first .h5 file found (or you can implement logic to select specific file)
@@ -305,7 +305,7 @@ class AMCNN():
             if self.model is not None:
                 try:
                     self.model.load_weights(local_weights_path)
-                    logger.info(f"Loaded weights from S3: {full_s3_path}")
+                    # logger.info(f"Loaded weights from S3: {full_s3_path}")
                     
                     import shutil
                     shutil.rmtree(local_temp_dir)
@@ -392,7 +392,7 @@ class AMCNN():
                 if not download.get("success"):
                     return {"status": "failed", "message": f"Failed to download weights", "metrics": {}}
                 chosen_ckpt = local_ckpt
-                logger.info(f"Loaded weights from S3: {eval_weights_s3_url}")
+                # logger.info(f"Loaded weights from S3: {eval_weights_s3_url}")
 
             # Local override or fallback
             if checkpoint_path and not chosen_ckpt:

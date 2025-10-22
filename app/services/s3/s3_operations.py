@@ -152,7 +152,7 @@ class S3Operations:
             # Upload file
             response = s3_client.client.put_object(**upload_params)
             
-            logger.info(f"Successfully uploaded file to {s3_url}")
+            # logger.info(f"Successfully uploaded file to {s3_url}")
             
             return {
                 "success": True,

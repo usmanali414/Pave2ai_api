@@ -278,7 +278,7 @@ def Save_image_patches_for_training(img_mappings, target_dir, color_code):
     
     # Progress bar for patch generation - single bar for entire dataset
     subset_name = os.path.basename(target_dir)
-    logger.info(f"Starting {subset_name} patch generation...")
+    # logger.info(f"Starting {subset_name} patch generation...")
     
     # Calculate total number of patches to process
     total_patches = 0
@@ -336,7 +336,7 @@ class RIEGLPreprocessor:
     """Preprocessor for RIEGL image and mask data with json_to_masks functionality."""
     
     def __init__(self):
-        logger.info("RIEGLPreprocessor.__init__() method called - preprocessor initialized")
+        # logger.info("RIEGLPreprocessor.__init__() method called - preprocessor initialized")
         
         # Initialize global ConfigurationDict for masks_to_patches functionality
         global ConfigurationDict
@@ -372,7 +372,7 @@ class RIEGLPreprocessor:
         Returns:
             Tuple of (processed_images, generated_masks)
         """
-        logger.info(f"Starting preprocessing for {len(image_paths)} image-annotation pairs")
+        # logger.info(f"Starting preprocessing for {len(image_paths)} image-annotation pairs")
         
         # Extract paths from the first pair to determine directory structure
         if image_paths and annotation_paths:
@@ -387,7 +387,7 @@ class RIEGLPreprocessor:
             orig_imgs_path = os.path.join(dataset_path,'orig_images')
             split_data_path = os.path.join(dataset_path,'split_patches_data')
             
-            logger.info(f"Dataset: {dataset_path}")
+            # logger.info(f"Dataset: {dataset_path}")
             
             # Step 1: Check directories and create masks
             check_dir_exists(json_folder_path, outputpath)
