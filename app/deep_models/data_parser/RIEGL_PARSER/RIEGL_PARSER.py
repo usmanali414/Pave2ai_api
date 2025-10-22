@@ -3,8 +3,8 @@ RIEGL Parser for transferring data from S3 to local directories.
 """
 from pathlib import Path
 import os
-from pathlib import Path
 from typing import Dict, Any, List
+from tqdm import tqdm as tq
 from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
 from config import database_config
@@ -166,13 +166,13 @@ class RIEGL_PARSER():
             if not list_result["success"]:
                 raise ValueError(f"Failed to list files in {s3_base_url}: {list_result['error']}")
             
-            
             # Use the configured images directory
             images_dir = self.directories["images_dir"]
-            jsons_dir = self.directories["jsons_dir"]
             
-            # Download images to local directory
-            for file_info in list_result["files"]:
+            # Download images to local directory with progress bar
+            files = list_result["files"]
+            
+            for file_info in tq(files, desc="Downloading images"):
                 try:
                     s3_url = file_info["s3_url"]
                     filename = file_info["key"].split('/')[-1]
@@ -189,7 +189,6 @@ class RIEGL_PARSER():
                         continue
                     
                     local_paths.append(str(local_path))
-                    logger.info(f"Successfully transferred image: {filename}")
                     
                 except Exception as e:
                     logger.error(f"Error transferring image from {file_info['s3_url']}: {str(e)}")
@@ -234,8 +233,8 @@ class RIEGL_PARSER():
             # Use the configured JSONs directory
             jsons_dir = self.directories["jsons_dir"]
             
-            # Download annotations to local directory
-            for file_info in json_files:
+            # Download annotations to local directory with progress bar
+            for file_info in tq(json_files, desc="Downloading annotations"):
                 try:
                     s3_url = file_info["s3_url"]
                     filename = file_info["key"].split('/')[-1]
@@ -252,7 +251,6 @@ class RIEGL_PARSER():
                         continue
                     
                     local_paths.append(str(local_path))
-                    logger.info(f"Successfully transferred annotation: {filename}")
                     
                 except Exception as e:
                     logger.error(f"Error transferring annotation from {file_info['s3_url']}: {str(e)}")

@@ -5,6 +5,7 @@ import sys
 import os
 import importlib
 import numpy as np
+import glob
 from typing import Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
@@ -64,41 +65,43 @@ class AMCNNOrchestrator:
                 raise ValueError(f"Training run not found: {train_run_id}")
             step_status = existing_run.get("step_status", {})
             
-            # Execute steps based on resume point - skip completed steps
-            loading_data_status = self._get_step_status(step_status, "loading_data")
-            preprocessing_status = self._get_step_status(step_status, "preprocessing")
-            training_status = self._get_step_status(step_status, "training")
-            saving_model_status = self._get_step_status(step_status, "saving_model")
+            # Execute steps sequentially based on resume point
+            steps = [
+                ("loading_data", self._execute_loading_data_step),
+                ("preprocessing", self._execute_preprocessing_step), 
+                ("training", self._execute_training_step),
+                ("saving_model", self._execute_saving_model_step)
+            ]
             
-            logger.info(f"Step statuses - loading_data: {loading_data_status}, preprocessing: {preprocessing_status}, training: {training_status}, saving_model: {saving_model_status}")
+            logger.info(f"Step statuses - loading_data: {self._get_step_status(step_status, 'loading_data')}, preprocessing: {self._get_step_status(step_status, 'preprocessing')}, training: {self._get_step_status(step_status, 'training')}, saving_model: {self._get_step_status(step_status, 'saving_model')}")
             
-            # Only execute loading_data if it's not completed
-            if loading_data_status != "completed":
-                logger.info("Executing loading_data step")
-                await self._execute_loading_data_step()
-            else:
-                logger.info("Skipping loading_data step - already completed")
+            # Find the first incomplete step to resume from
+            resume_from_index = None
+            for i, (step_name, _) in enumerate(steps):
+                status = self._get_step_status(step_status, step_name)
+                if status not in ["completed"]:
+                    resume_from_index = i
+                    logger.info(f"Resuming from step: {step_name} (status: {status})")
+                    break
             
-            # Only execute preprocessing if it's not completed
-            if preprocessing_status != "completed":
-                logger.info("Executing preprocessing step")
-                await self._execute_preprocessing_step()
-            else:
-                logger.info("Skipping preprocessing step - already completed")
+            if resume_from_index is None:
+                logger.info("All steps are completed - nothing to resume")
+                return {
+                    "status": "completed",
+                    "train_run_id": self.train_run_id
+                }
             
-            # Only execute training if it's not completed
-            if training_status != "completed":
-                logger.info("Executing training step")
-                await self._execute_training_step()
-            else:
-                logger.info("Skipping training step - already completed")
-            
-            # Only execute saving_model if it's not completed
-            if saving_model_status != "completed":
-                logger.info("Executing saving_model step")
-                await self._execute_saving_model_step()
-            else:
-                logger.info("Skipping saving_model step - already completed")
+            # Execute steps starting from the resume point
+            for i, (step_name, step_function) in enumerate(steps):
+                if i < resume_from_index:
+                    logger.info(f"Skipping {step_name} step - already completed")
+                    continue
+                elif i == resume_from_index:
+                    logger.info(f"Executing {step_name} step - resuming from here")
+                    await step_function()
+                else:
+                    logger.info(f"Executing {step_name} step - continuing pipeline")
+                    await step_function()
             
             # Update final status
             await self._update_train_run_final_status(train_run_id, "completed")
@@ -173,9 +176,35 @@ class AMCNNOrchestrator:
                 components = await self._load_training_components(self.train_config)
                 self.model = components["model"]
             
+            # Validate dataset path exists
+            dataset_path = self._get_dataset_path()
+            if not os.path.exists(dataset_path):
+                raise ValueError(f"Dataset path does not exist: {dataset_path}")
+            
+            # Check if preprocessed data exists
+            train_path = os.path.join(dataset_path, "split_patches_data", "train")
+            val_path = os.path.join(dataset_path, "split_patches_data", "val")
+            test_path = os.path.join(dataset_path, "split_patches_data", "test")
+            
+            for path_name, path in [("train", train_path), ("val", val_path), ("test", test_path)]:
+                if not os.path.exists(path):
+                    raise ValueError(f"Preprocessed data path does not exist: {path}")
+                
+                # Check if path contains data files
+                npz_files = []
+                for class_dir in os.listdir(path):
+                    class_path = os.path.join(path, class_dir)
+                    if os.path.isdir(class_path):
+                        npz_files.extend(glob.glob(os.path.join(class_path, "*.npz")))
+                
+                if not npz_files:
+                    raise ValueError(f"No .npz files found in {path_name} directory: {path}")
+                
+                logger.info(f"Found {len(npz_files)} .npz files in {path_name} directory")
+            
             # Prepare training config
             training_config = self.train_config.get("metadata", {})
-            training_config["dataset_path"] = self._get_dataset_path()
+            training_config["dataset_path"] = dataset_path
             training_config["logs_output_path"] = self._get_logs_output_path()
             training_config["load_initial_weights"] = self.train_config.get("metadata", {}).get("initial_weights", False)
             training_config["initial_weights_path"] = self._get_initial_weights_path()

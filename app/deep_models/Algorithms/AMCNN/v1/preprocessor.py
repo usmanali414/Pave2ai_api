@@ -276,42 +276,58 @@ def Save_image_patches_for_training(img_mappings, target_dir, color_code):
     counter = np.int64(0)
     cs_temp = 0
     
-    # Progress bar for patch generation
+    # Progress bar for patch generation - single bar for entire dataset
     subset_name = os.path.basename(target_dir)
-    for img_name_iter in tq(range(len(img_mappings)), desc=f"Generating {subset_name} patches"):
-        # starttime = time.time() 
+    logger.info(f"Starting {subset_name} patch generation...")
+    
+    # Calculate total number of patches to process
+    total_patches = 0
+    for img_name_iter in range(len(img_mappings)):
         img = cv2.imread(img_mappings[img_name_iter][0])
-        #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
-        # print(img_mappings[img_name_iter][0])
-        # print(img_mappings[img_name_iter][1])
         mask = cv2.imread(img_mappings[img_name_iter][1])
-        #print("Image number: ",cs_temp)
-        cs_temp+=1
-        # print(img.shape)
-        # print(mask.shape)
-        #if ConfigurationDict['same_size_images'] == False:
         image_size = img.shape[:2]
-        no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
-          #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
+        no_of_rows, no_of_cols = get_no_rows_cols(image_size, base_patch_size)
+        total_patches += (no_of_rows - 1) * (no_of_cols - 1)
+    
+    # Single progress bar for the entire dataset
+    with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
+        for img_name_iter in range(len(img_mappings)):
+            # starttime = time.time() 
+            img = cv2.imread(img_mappings[img_name_iter][0])
+            #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
+            # print(img_mappings[img_name_iter][0])
+            # print(img_mappings[img_name_iter][1])
+            mask = cv2.imread(img_mappings[img_name_iter][1])
+            #print("Image number: ",cs_temp)
+            cs_temp+=1
+            # print(img.shape)
+            # print(mask.shape)
+            #if ConfigurationDict['same_size_images'] == False:
+            image_size = img.shape[:2]
+            no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
+              #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
 
-        padded_imgs_list  ,  padding_tuples_list = get_padded_imgs(img,image_size)
-        
-        threads = []
-        with ThreadPoolExecutor() as executor:
-            '''Iterating over rows and cols tiles'''
-            for col_index1 in range(no_of_cols-1):
-                for row_index1 in range(no_of_rows-1):
-                    thread = executor.submit(process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
-                    threads.append(thread)
-                    counter += 1
+            padded_imgs_list  ,  padding_tuples_list = get_padded_imgs(img,image_size)
+            
+            threads = []
+            with ThreadPoolExecutor() as executor:
+                '''Iterating over rows and cols tiles'''
+                for col_index1 in range(no_of_cols-1):
+                    for row_index1 in range(no_of_rows-1):
+                        thread = executor.submit(process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
+                        threads.append(thread)
+                        counter += 1
 
-        # Optionally wait for all tasks to complete and handle results/errors
-        for future in as_completed(threads):
-            try:
-                result = future.result()  # You could return something useful here
-            except Exception as e:
-                logger.error(f"Patch processing error: {e}")
-        #print("time: ",time.time()-starttime )
+            # Optionally wait for all tasks to complete and handle results/errors
+            for future in as_completed(threads):
+                try:
+                    result = future.result()  # You could return something useful here
+                    pbar.update(1)  # Update progress bar for each completed tile
+                except Exception as e:
+                    logger.error(f"Patch processing error: {e}")
+    
+    logger.info(f"✓ {subset_name} patch generation completed")
+    #print("time: ",time.time()-starttime )
 
 
 
@@ -420,12 +436,15 @@ class RIEGLPreprocessor:
             logger.info(f"Data split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}")
             
             # Generate patches for each split
+            logger.info("Generating training patches...")
             target_dir = os.path.join(split_data_path,'train')
             Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
             
+            logger.info("Generating validation patches...")
             target_dir = os.path.join(split_data_path,'val')
             Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
             
+            logger.info("Generating test patches...")
             target_dir = os.path.join(split_data_path,'test')
             Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
             

@@ -287,7 +287,6 @@ class S3Operations:
             if return_content:
                 result["content"] = file_content
             
-            logger.info(f"Successfully downloaded file from {s3_url}")
             return result
             
         except Exception as e:

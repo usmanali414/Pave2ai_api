@@ -196,7 +196,8 @@ def _determine_resume_point(step_status: Dict[str, Any]) -> str:
         else:
             status = step_info  # Handle old format
         
-        if status in [None, "failed", "in_progress"]:
+        # Resume from first step that is not completed
+        if status not in ["completed"]:
             return step
         elif status == "completed":
             continue  # Skip completed steps
