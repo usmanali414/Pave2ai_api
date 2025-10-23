@@ -10,6 +10,7 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
 from app.utils.logger_utils import logger
+import asyncio
 
 class RIEGL_PARSER():
     """RIEGL Parser for transferring images and annotations from S3 to local directories."""
@@ -72,8 +73,8 @@ class RIEGL_PARSER():
             logger.info(f"Transferring annotations from: {annotate_label_url}")
             
             # Transfer images and annotations to local directories
-            image_paths = self._transfer_images_from_s3(preprocessed_data_url)
-            annotation_paths = self._transfer_annotations_from_s3(annotate_label_url)
+            image_paths = await self._transfer_images_from_s3(preprocessed_data_url)
+            annotation_paths = await self._transfer_annotations_from_s3(annotate_label_url)
             
             if not image_paths or not annotation_paths:
                 raise ValueError("No images or annotations transferred")
@@ -147,7 +148,7 @@ class RIEGL_PARSER():
             logger.error(f"Error validating data: {str(e)}")
             return False
     
-    def _transfer_images_from_s3(self, s3_base_url: str) -> List[str]:
+    async def _transfer_images_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer images from S3 to local directory.
         
@@ -179,7 +180,8 @@ class RIEGL_PARSER():
                     local_path = images_dir / filename
                     
                     # Download file from S3
-                    result = self.s3_operations.download_file(
+                    result = await asyncio.to_thread(
+                        self.s3_operations.download_file,
                         s3_url=s3_url,
                         local_path=str(local_path)
                     )
@@ -201,7 +203,7 @@ class RIEGL_PARSER():
             logger.error(f"Error transferring images from S3: {str(e)}")
             return local_paths
     
-    def _transfer_annotations_from_s3(self, s3_base_url: str) -> List[str]:
+    async def _transfer_annotations_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer JSON annotations from S3 to local directory.
         

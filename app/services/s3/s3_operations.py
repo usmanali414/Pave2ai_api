@@ -403,7 +403,7 @@ class S3Operations:
                     files = files[:max_keys]  # Trim to max_keys
                     break
             
-            logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix} (iterations: {total_iterations})")
+            # logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix} (iterations: {total_iterations})")
             
             return {
                 "success": True,

@@ -20,6 +20,7 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.utils.logger_utils import logger
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
+import asyncio
 
 
 def normalize_component_name(name: str) -> str:
@@ -353,9 +354,7 @@ class AMCNNOrchestrator:
             training_config["load_initial_weights"] = self.train_config.get("metadata", {}).get("initial_weights", False)
             training_config["initial_weights_path"] = self._get_initial_weights_path()
             
-            training_results = self.model.train(training_config)
-            if training_results["status"] != "completed":
-                raise RuntimeError("Failed to train model")
+            training_results = await self.model.train(training_config)
             
             await self._update_train_run_status(self.train_run_id, "training", "completed")
             
@@ -388,8 +387,9 @@ class AMCNNOrchestrator:
             training_logs_csv_url = f"{output_logs_url}/experiment1_accumulated_checkpointV1.csv"
             await self._update_train_run_results(self.train_run_id, training_logs_csv_url, "training")
             
-            # Run evaluation
-            eval_results = self.model.evaluate(
+           # New (NON-BLOCKING):
+            eval_results = await asyncio.to_thread(
+                self.model.evaluate,
                 dataset_path=self._get_dataset_path(),
                 eval_weights_s3_url=weights_path,
                 eval_logs_s3_url=output_logs_url
@@ -441,7 +441,8 @@ class AMCNNOrchestrator:
             # Always set initial weights base path (used in both true/false cases)
             training_config["initial_weights_path"] = self._get_initial_weights_path()
             
-            training_results = self.model.train(training_config)
+            # train
+            training_results = await self.model.train(training_config)
             if training_results["status"] != "completed":
                 await self._update_train_run_status(train_run_id, "training", "failed")
                 raise RuntimeError("Failed to train model")
@@ -465,7 +466,9 @@ class AMCNNOrchestrator:
             await self._update_train_run_results(train_run_id, training_logs_csv_url, "training")
             
             # Run evaluation
-            eval_results = self.model.evaluate(
+            # CHANGE TO (NON-BLOCKING):
+            eval_results = await asyncio.to_thread(
+                self.model.evaluate,
                 dataset_path=self._get_dataset_path(),
                 eval_weights_s3_url=weights_path,
                 eval_logs_s3_url=output_logs_url
@@ -642,7 +645,9 @@ class AMCNNOrchestrator:
                 # logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs")
                 
                 # Run preprocessing (assuming the method is called preprocess_images_and_annotations)
-                preprocessor.preprocess_images_and_annotations(
+                # New (NON-BLOCKING):
+                await asyncio.to_thread(
+                    preprocessor.preprocess_images_and_annotations,
                     image_paths, annotation_paths, project_id
                 )
                 
