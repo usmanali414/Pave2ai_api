@@ -174,7 +174,7 @@
         <option value="">All Statuses</option>
         <option value="completed">Completed</option>
         <option value="failed">Failed</option>
-        <option value="training">In Progress</option>
+        <option value="in progress">In Progress</option>
       </select>
     </div>
     <button class="btn" onclick="resetFilters()">Reset</button>
@@ -197,7 +197,7 @@
   </div>
   
   <!-- Progress Indicators -->
-  <div class="progress-indicators" id="progress-indicators" style="display: none;">
+  <!-- <div class="progress-indicators" id="progress-indicators" style="display: none;">
     <h4>Training Progress</h4>
     <div class="step-progress">
       <div class="step" id="step-loading_data">
@@ -217,7 +217,7 @@
         <span class="step-status">⏳</span>
       </div>
     </div>
-  </div>
+  </div> -->
 </div>
 
 <script>
@@ -573,73 +573,73 @@
   }
   
   // Update progress indicators for a specific run
-  function updateProgressIndicators(runId) {
-    fetch('/train/status/' + encodeURIComponent(runId))
-      .then(function(r) {
-        if (!r.ok) return;
-        return r.json();
-      })
-      .then(function(data) {
-        if (!data) return;
+  // function updateProgressIndicators(runId) {
+  //   fetch('/train/status/' + encodeURIComponent(runId))
+  //     .then(function(r) {
+  //       if (!r.ok) return;
+  //       return r.json();
+  //     })
+  //     .then(function(data) {
+  //       if (!data) return;
         
-        var stepStatus = data.step_status || {};
-        var steps = ['loading_data', 'preprocessing', 'training', 'saving_model'];
+  //       var stepStatus = data.step_status || {};
+  //       var steps = ['loading_data', 'preprocessing', 'training', 'saving_model'];
         
-        steps.forEach(function(step) {
-          var stepElement = document.getElementById('step-' + step);
-          if (!stepElement) return;
+  //       steps.forEach(function(step) {
+  //         var stepElement = document.getElementById('step-' + step);
+  //         if (!stepElement) return;
           
-          var statusElement = stepElement.querySelector('.step-status');
-          var stepInfo = stepStatus[step] || {};
-          var status = 'pending';
+  //         var statusElement = stepElement.querySelector('.step-status');
+  //         var stepInfo = stepStatus[step] || {};
+  //         var status = 'pending';
           
-          // Handle both old format (string) and new format (object)
-          if (typeof stepInfo === 'string') {
-            status = stepInfo;
-          } else if (typeof stepInfo === 'object' && stepInfo !== null) {
-            status = stepInfo.status || 'pending';
-          }
+  //         // Handle both old format (string) and new format (object)
+  //         if (typeof stepInfo === 'string') {
+  //           status = stepInfo;
+  //         } else if (typeof stepInfo === 'object' && stepInfo !== null) {
+  //           status = stepInfo.status || 'pending';
+  //         }
           
-          stepElement.className = 'step';
-          statusElement.textContent = '⏳';
+  //         stepElement.className = 'step';
+  //         statusElement.textContent = '⏳';
           
-          if (status === 'completed') {
-            stepElement.classList.add('completed');
-            statusElement.textContent = '✅';
-          } else if (status === 'in_progress') {
-            stepElement.classList.add('in-progress');
-            statusElement.textContent = '🔄';
-          } else if (status === 'failed') {
-            stepElement.classList.add('failed');
-            statusElement.textContent = '❌';
-          } else {
-            stepElement.classList.add('pending');
-            statusElement.textContent = '⏳';
-          }
-        });
+  //         if (status === 'completed') {
+  //           stepElement.classList.add('completed');
+  //           statusElement.textContent = '✅';
+  //         } else if (status === 'in_progress') {
+  //           stepElement.classList.add('in-progress');
+  //           statusElement.textContent = '🔄';
+  //         } else if (status === 'failed') {
+  //           stepElement.classList.add('failed');
+  //           statusElement.textContent = '❌';
+  //         } else {
+  //           stepElement.classList.add('pending');
+  //           statusElement.textContent = '⏳';
+  //         }
+  //       });
         
-        // Show progress indicators if any step is in progress
-        var hasInProgress = steps.some(function(step) {
-          var stepInfo = stepStatus[step] || {};
-          var status = 'pending';
-          if (typeof stepInfo === 'string') {
-            status = stepInfo;
-          } else if (typeof stepInfo === 'object' && stepInfo !== null) {
-            status = stepInfo.status || 'pending';
-          }
-          return status === 'in_progress';
-        });
+  //       // Show progress indicators if any step is in progress
+  //       var hasInProgress = steps.some(function(step) {
+  //         var stepInfo = stepStatus[step] || {};
+  //         var status = 'pending';
+  //         if (typeof stepInfo === 'string') {
+  //           status = stepInfo;
+  //         } else if (typeof stepInfo === 'object' && stepInfo !== null) {
+  //           status = stepInfo.status || 'pending';
+  //         }
+  //         return status === 'in_progress';
+  //       });
         
-        if (hasInProgress) {
-          document.getElementById('progress-indicators').style.display = 'block';
-        } else {
-          document.getElementById('progress-indicators').style.display = 'none';
-        }
-      })
-      .catch(function(e) {
-        console.error('Error updating progress:', e);
-      });
-  }
+  //       if (hasInProgress) {
+  //         document.getElementById('progress-indicators').style.display = 'block';
+  //       } else {
+  //         document.getElementById('progress-indicators').style.display = 'none';
+  //       }
+  //     })
+  //     .catch(function(e) {
+  //       console.error('Error updating progress:', e);
+  //     });
+  // }
 
   // Auto-refresh for in-progress runs
   function autoRefresh(){

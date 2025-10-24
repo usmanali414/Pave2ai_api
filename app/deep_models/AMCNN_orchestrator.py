@@ -5,6 +5,7 @@ import sys
 import os
 import importlib
 import numpy as np
+import glob
 from typing import Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
 from config import database_config
 from app.utils.logger_utils import logger
+from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
+import asyncio
 
 
 def normalize_component_name(name: str) -> str:
@@ -50,7 +53,7 @@ class AMCNNOrchestrator:
             Training results
         """
         try:
-            logger.info(f"Starting AMCNN training pipeline with resume - config: {train_config_id}, run: {train_run_id}, resume_from: {resume_from}")
+            # logger.info(f"Starting AMCNN training pipeline with resume - config: {train_config_id}, run: {train_run_id}, resume_from: {resume_from}")
             
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
@@ -64,45 +67,47 @@ class AMCNNOrchestrator:
                 raise ValueError(f"Training run not found: {train_run_id}")
             step_status = existing_run.get("step_status", {})
             
-            # Execute steps based on resume point - skip completed steps
-            loading_data_status = self._get_step_status(step_status, "loading_data")
-            preprocessing_status = self._get_step_status(step_status, "preprocessing")
-            training_status = self._get_step_status(step_status, "training")
-            saving_model_status = self._get_step_status(step_status, "saving_model")
+            # Execute steps sequentially based on resume point
+            steps = [
+                ("loading_data", self._execute_loading_data_step),
+                ("preprocessing", self._execute_preprocessing_step), 
+                ("training", self._execute_training_step),
+                ("saving_model", self._execute_saving_model_step)
+            ]
             
-            logger.info(f"Step statuses - loading_data: {loading_data_status}, preprocessing: {preprocessing_status}, training: {training_status}, saving_model: {saving_model_status}")
+            logger.info(f"Step statuses - loading_data: {self._get_step_status(step_status, 'loading_data')}, preprocessing: {self._get_step_status(step_status, 'preprocessing')}, training: {self._get_step_status(step_status, 'training')}, saving_model: {self._get_step_status(step_status, 'saving_model')}")
             
-            # Only execute loading_data if it's not completed
-            if loading_data_status != "completed":
-                logger.info("Executing loading_data step")
-                await self._execute_loading_data_step()
-            else:
-                logger.info("Skipping loading_data step - already completed")
+            # Find the first incomplete step to resume from
+            resume_from_index = None
+            for i, (step_name, _) in enumerate(steps):
+                status = self._get_step_status(step_status, step_name)
+                if status not in ["completed"]:
+                    resume_from_index = i
+                    # logger.info(f"Resuming from step: {step_name} (status: {status})")
+                    break
             
-            # Only execute preprocessing if it's not completed
-            if preprocessing_status != "completed":
-                logger.info("Executing preprocessing step")
-                await self._execute_preprocessing_step()
-            else:
-                logger.info("Skipping preprocessing step - already completed")
+            if resume_from_index is None:
+                logger.info("All steps are completed - nothing to resume")
+                return {
+                    "status": "completed",
+                    "train_run_id": self.train_run_id
+                }
             
-            # Only execute training if it's not completed
-            if training_status != "completed":
-                logger.info("Executing training step")
-                await self._execute_training_step()
-            else:
-                logger.info("Skipping training step - already completed")
-            
-            # Only execute saving_model if it's not completed
-            if saving_model_status != "completed":
-                logger.info("Executing saving_model step")
-                await self._execute_saving_model_step()
-            else:
-                logger.info("Skipping saving_model step - already completed")
+            # Execute steps starting from the resume point
+            for i, (step_name, step_function) in enumerate(steps):
+                if i < resume_from_index:
+                    # logger.info(f"Skipping {step_name} step - already completed")
+                    continue
+                elif i == resume_from_index:
+                    # logger.info(f"Executing {step_name} step - resuming from here")
+                    await step_function()
+                else:
+                    # logger.info(f"Executing {step_name} step - continuing pipeline")
+                    await step_function()
             
             # Update final status
             await self._update_train_run_final_status(train_run_id, "completed")
-            logger.info(f"Training pipeline completed with resume - run: {train_run_id}")
+            # logger.info(f"Training pipeline completed with resume - run: {train_run_id}")
             
             return {
                 "status": "completed",
@@ -123,17 +128,59 @@ class AMCNNOrchestrator:
         try:
             await self._update_train_run_status(self.train_run_id, "loading_data", "in_progress")
             
-            components = await self._load_training_components(self.train_config)
-            self.data_parser = components["data_parser"]
-            self.model = components["model"]
+            # ✅ Get paths from config (no hardcoding)
+            local_images_path = self._get_local_directory_path("images_dir")
+            local_jsons_path = self._get_local_directory_path("jsons_dir")
+            
+            # ✅ Check the current step status from database
+            db = mongo_client.database
+            train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            existing_run = await train_runs.find_one({"_id": ObjectId(self.train_run_id)})
+            current_step_status = existing_run.get("step_status", {}).get("loading_data") if existing_run else None
+            
+            # ✅ ONLY skip loading if it was previously COMPLETED
+            # If it failed, incomplete, or None - always re-download
+            if current_step_status == "completed":
+                # Double-check that data actually exists locally
+                data_exists = (
+                    os.path.exists(local_images_path) and 
+                    os.path.exists(local_jsons_path) and
+                    len(os.listdir(local_images_path)) > 0 and
+                    len(os.listdir(local_jsons_path)) > 0
+                )
+                
+                if data_exists:
+                    logger.info(f"✓ Data loading already complete - skipping download:")
+                    logger.info(f"  - Images: {len(os.listdir(local_images_path))} files in {local_images_path}")
+                    logger.info(f"  - Annotations: {len(os.listdir(local_jsons_path))} files in {local_jsons_path}")
+                else:
+                    logger.info("⚠ Loading marked as complete but data is missing - re-downloading...")
+                    current_step_status = "failed"  # Force re-download
+            else:
+                # Loading was failed, incomplete, or never run
+                logger.info(f"Loading data status: {current_step_status} - downloading from S3...")
+            
+            # Download data if not completed or data missing
+            if current_step_status != "completed":
+                logger.info("Downloading data from S3...")
+                components = await self._load_training_components(self.train_config)
+                self.data_parser = components["data_parser"]
+                self.model = components["model"]
 
-            transferred_data = await self.data_parser.load_data(self.train_config)
-            if not self.data_parser.validate_transferred_data(transferred_data):
-                raise ValueError("Data validation failed")
+                transferred_data = await self.data_parser.load_data(self.train_config)
+                if not self.data_parser.validate_transferred_data(transferred_data):
+                    raise ValueError("Data validation failed")
+            
+            # Always load components (needed for next steps)
+            if not hasattr(self, 'data_parser') or not self.data_parser:
+                components = await self._load_training_components(self.train_config)
+                self.data_parser = components["data_parser"]
+                self.model = components["model"]
             
             await self._update_train_run_status(self.train_run_id, "loading_data", "completed")
             
         except Exception as e:
+            logger.error(f"Error in loading_data step: {str(e)}")
             await self._update_train_run_status(self.train_run_id, "loading_data", "failed")
             raise
 
@@ -143,23 +190,123 @@ class AMCNNOrchestrator:
         try:
             await self._update_train_run_status(self.train_run_id, "preprocessing", "in_progress")
             
-            # Only load data if not already loaded (loading_data step was skipped)
-            if not hasattr(self, 'data_parser') or not self.data_parser:
-                logger.info("Loading data for preprocessing step")
-                components = await self._load_training_components(self.train_config)
-                self.data_parser = components["data_parser"]
-                transferred_data = await self.data_parser.load_data(self.train_config)
+            # ✅ Get paths from config (no hardcoding)
+            local_images_path = self._get_local_directory_path("images_dir")
+            local_jsons_path = self._get_local_directory_path("jsons_dir")
+            local_masks_path = self._get_local_directory_path("masks_dir")
+            local_patches_path = self._get_local_directory_path("patches_dir")
+            
+            # ✅ NEW: Get the current step status from database
+            db = mongo_client.database
+            train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+            existing_run = await train_runs.find_one({"_id": ObjectId(self.train_run_id)})
+            current_step_status = existing_run.get("step_status", {}).get("preprocessing") if existing_run else None
+            
+            # ✅ ONLY skip preprocessing if it was previously COMPLETED
+            # If it failed, incomplete, or None - always re-run
+            if current_step_status == "completed":
+                # Double-check that all preprocessing outputs actually exist
+                preprocessing_complete = (
+                    os.path.exists(local_patches_path) and
+                    os.path.exists(os.path.join(local_patches_path, "train")) and
+                    os.path.exists(os.path.join(local_patches_path, "val")) and
+                    os.path.exists(os.path.join(local_patches_path, "test"))
+                )
+                
+                if preprocessing_complete:
+                    # Verify that patches actually exist in all splits
+                    train_path = os.path.join(local_patches_path, "train")
+                    val_path = os.path.join(local_patches_path, "val")
+                    test_path = os.path.join(local_patches_path, "test")
+                    
+                    train_npz = sum(1 for root, dirs, files in os.walk(train_path) for file in files if file.endswith('.npz'))
+                    val_npz = sum(1 for root, dirs, files in os.walk(val_path) for file in files if file.endswith('.npz'))
+                    test_npz = sum(1 for root, dirs, files in os.walk(test_path) for file in files if file.endswith('.npz'))
+                    
+                    if train_npz > 0 and val_npz > 0 and test_npz > 0:
+                        logger.info(f"✓ Preprocessing already complete - skipping:")
+                        logger.info(f"  - Train: {train_npz} patches")
+                        logger.info(f"  - Val: {val_npz} patches")
+                        logger.info(f"  - Test: {test_npz} patches")
+                        await self._update_train_run_status(self.train_run_id, "preprocessing", "completed")
+                        return
+                    else:
+                        logger.info(f"⚠ Preprocessing marked as complete but data is incomplete:")
+                        logger.info(f"  - Train: {train_npz} patches")
+                        logger.info(f"  - Val: {val_npz} patches")
+                        logger.info(f"  - Test: {test_npz} patches")
+                        logger.info(f"  - Re-running preprocessing...")
+                else:
+                    logger.info("⚠ Preprocessing marked as complete but directories missing - re-running...")
             else:
-                logger.info("Using already loaded data for preprocessing step")
-                # Data is already loaded, just get the transferred data info
+                # Preprocessing was failed, incomplete, or never run
+                logger.info(f"Preprocessing status: {current_step_status} - running preprocessing...")
+            
+            # ✅ Clean up incomplete preprocessing data before re-running
+            if os.path.exists(local_patches_path):
+                # logger.info(f"Cleaning up incomplete preprocessing data at {local_patches_path}")
+                import shutil
+                shutil.rmtree(local_patches_path)
+            
+            # Check if raw data exists locally (images and jsons)
+            data_exists_locally = (
+                os.path.exists(local_images_path) and 
+                os.path.exists(local_jsons_path) and
+                len(os.listdir(local_images_path)) > 0 and
+                len(os.listdir(local_jsons_path)) > 0
+            )
+            
+            if data_exists_locally:
+                logger.info(f"✓ Raw data exists locally:")
+                logger.info(f"  - Images: {len(os.listdir(local_images_path))} files")
+                logger.info(f"  - Annotations: {len(os.listdir(local_jsons_path))} files")
+                logger.info(f"  - Skipping data download, using existing local data")
+                
+                # Load components if needed
+                if not hasattr(self, 'data_parser') or not self.data_parser:
+                    components = await self._load_training_components(self.train_config)
+                    self.data_parser = components["data_parser"]
+                
+                # ✅ BUILD FILE LISTS (not just directory paths!)
+                image_files = sorted(glob.glob(os.path.join(local_images_path, "*.*")))
+                json_files = sorted(glob.glob(os.path.join(local_jsons_path, "*.json")))
+                
+                # ✅ Build transferred_data matching RIEGL_PARSER format
+                transferred_data = {
+                    "image_paths": image_files,           # ✅ List of file paths
+                    "annotation_paths": json_files,        # ✅ List of file paths
+                    "project_id": self.train_config.get("project_id"),  # ✅ Add project_id
+                    "tenant_id": self.train_config.get("tenant_id"),    # ✅ Add tenant_id
+                    "s3_urls": {
+                        "preprocessed_data": None,
+                        "annotate_label": None
+                    },
+                    "local_directories": {
+                        "images_dir": local_images_path,
+                        "jsons_dir": local_jsons_path
+                    }
+                }
+                
+                # logger.info(f"  - Built file lists: {len(image_files)} images, {len(json_files)} annotations")
+            else:
+                # Data doesn't exist locally - need to download
+                logger.info("Raw data not found locally - downloading from S3...")
+                
+                if not hasattr(self, 'data_parser') or not self.data_parser:
+                    components = await self._load_training_components(self.train_config)
+                    self.data_parser = components["data_parser"]
+                
                 transferred_data = await self.data_parser.load_data(self.train_config)
             
+            # Run preprocessing
+            # logger.info("Running AMCNN preprocessor...")
             model_version = self.train_config.get("model_version", "v1")
             await self._run_amcnn_preprocessor(transferred_data, model_version)
             
             await self._update_train_run_status(self.train_run_id, "preprocessing", "completed")
             
         except Exception as e:
+            logger.error(f"Error in preprocessing step: {str(e)}")
             await self._update_train_run_status(self.train_run_id, "preprocessing", "failed")
             raise
 
@@ -173,16 +320,41 @@ class AMCNNOrchestrator:
                 components = await self._load_training_components(self.train_config)
                 self.model = components["model"]
             
+            # Validate dataset path exists
+            dataset_path = self._get_dataset_path()
+            if not os.path.exists(dataset_path):
+                raise ValueError(f"Dataset path does not exist: {dataset_path}")
+            
+            # ✅ Get patches path from config (no hardcoding)
+            patches_base_path = self._get_local_directory_path("patches_dir")
+            train_path = os.path.join(patches_base_path, "train")
+            val_path = os.path.join(patches_base_path, "val")
+            test_path = os.path.join(patches_base_path, "test")
+            
+            for path_name, path in [("train", train_path), ("val", val_path), ("test", test_path)]:
+                if not os.path.exists(path):
+                    raise ValueError(f"Preprocessed data path does not exist: {path}")
+                
+                # Check if path contains data files
+                npz_files = []
+                for class_dir in os.listdir(path):
+                    class_path = os.path.join(path, class_dir)
+                    if os.path.isdir(class_path):
+                        npz_files.extend(glob.glob(os.path.join(class_path, "*.npz")))
+                
+                if not npz_files:
+                    raise ValueError(f"No .npz files found in {path_name} directory: {path}")
+                
+                logger.info(f"Found {len(npz_files)} .npz files in {path_name} directory")
+            
             # Prepare training config
             training_config = self.train_config.get("metadata", {})
-            training_config["dataset_path"] = self._get_dataset_path()
+            training_config["dataset_path"] = dataset_path
             training_config["logs_output_path"] = self._get_logs_output_path()
             training_config["load_initial_weights"] = self.train_config.get("metadata", {}).get("initial_weights", False)
             training_config["initial_weights_path"] = self._get_initial_weights_path()
             
-            training_results = self.model.train(training_config)
-            if training_results["status"] != "completed":
-                raise RuntimeError("Failed to train model")
+            training_results = await self.model.train(training_config)
             
             await self._update_train_run_status(self.train_run_id, "training", "completed")
             
@@ -215,8 +387,9 @@ class AMCNNOrchestrator:
             training_logs_csv_url = f"{output_logs_url}/experiment1_accumulated_checkpointV1.csv"
             await self._update_train_run_results(self.train_run_id, training_logs_csv_url, "training")
             
-            # Run evaluation
-            eval_results = self.model.evaluate(
+           # New (NON-BLOCKING):
+            eval_results = await asyncio.to_thread(
+                self.model.evaluate,
                 dataset_path=self._get_dataset_path(),
                 eval_weights_s3_url=weights_path,
                 eval_logs_s3_url=output_logs_url
@@ -233,7 +406,7 @@ class AMCNNOrchestrator:
     async def execute_training(self, train_config_id: str, train_run_id: str = None) -> Dict[str, Any]:
 
         try:
-            logger.info(f"Starting AMCNN training pipeline - config: {train_config_id}, run: {train_run_id}")
+            # logger.info(f"Starting AMCNN training pipeline - config: {train_config_id}, run: {train_run_id}")
             
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
@@ -268,7 +441,8 @@ class AMCNNOrchestrator:
             # Always set initial weights base path (used in both true/false cases)
             training_config["initial_weights_path"] = self._get_initial_weights_path()
             
-            training_results = self.model.train(training_config)
+            # train
+            training_results = await self.model.train(training_config)
             if training_results["status"] != "completed":
                 await self._update_train_run_status(train_run_id, "training", "failed")
                 raise RuntimeError("Failed to train model")
@@ -292,7 +466,9 @@ class AMCNNOrchestrator:
             await self._update_train_run_results(train_run_id, training_logs_csv_url, "training")
             
             # Run evaluation
-            eval_results = self.model.evaluate(
+            # CHANGE TO (NON-BLOCKING):
+            eval_results = await asyncio.to_thread(
+                self.model.evaluate,
                 dataset_path=self._get_dataset_path(),
                 eval_weights_s3_url=weights_path,
                 eval_logs_s3_url=output_logs_url
@@ -469,7 +645,9 @@ class AMCNNOrchestrator:
                 # logger.info(f"Processing {len(image_annotation_pairs)} image-annotation pairs")
                 
                 # Run preprocessing (assuming the method is called preprocess_images_and_annotations)
-                preprocessor.preprocess_images_and_annotations(
+                # New (NON-BLOCKING):
+                await asyncio.to_thread(
+                    preprocessor.preprocess_images_and_annotations,
                     image_paths, annotation_paths, project_id
                 )
                 
@@ -496,7 +674,7 @@ class AMCNNOrchestrator:
             model_name = normalize_component_name(train_config["metadata"].get("model_name"))
             model_version = normalize_component_name(train_config.get("model_version"))
             
-            logger.info(f"Loading {parser_name} parser and {model_name} {model_version}")
+            # logger.info(f"Loading {parser_name} parser and {model_name} {model_version}")
             
             # Load data parser using exact parser name
             data_parser = await self._load_component_dynamic(
@@ -668,11 +846,33 @@ class AMCNNOrchestrator:
         try:
             current_file = Path(__file__)
             project_root = current_file.parents[2]
-            dataset_path = project_root / "static"
+            # Use config instead of hardcoding "static"
+            base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
+            dataset_path = project_root / base_path
             return str(dataset_path)
         except Exception as e:
             logger.error(f"Error getting dataset path: {str(e)}")
-            return os.path.join(os.getcwd(), "static")
+            # Fallback still uses config
+            base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
+            return os.path.join(os.getcwd(), base_path)
+    
+    def _get_local_directory_path(self, dir_key: str) -> str:
+        """
+        Get local directory path from RIEGL_PARSER_CONFIG.
+        
+        Args:
+            dir_key: Key from RIEGL_PARSER_CONFIG (e.g., 'images_dir', 'jsons_dir')
+            
+        Returns:
+            Full path to the directory
+        """
+        try:
+            dataset_path = self._get_dataset_path()
+            relative_path = RIEGL_PARSER_CONFIG["local_storage"][dir_key]
+            return os.path.join(dataset_path, relative_path)
+        except Exception as e:
+            logger.error(f"Error getting local directory path for {dir_key}: {str(e)}")
+            raise
 
     async def _update_train_run_results(self, train_run_id: str, logs_s3_url: Any, target: str):
         """Update train run results under {target}_logs_s3_url (e.g., 'training_logs_s3_url' or 'evaluation_logs_s3_url')."""

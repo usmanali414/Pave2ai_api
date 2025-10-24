@@ -3,7 +3,7 @@ import os
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, List
-from concurrent.futures import ThreadPoolExecutor
+# from concurrent.futures import ThreadPoolExecutor
 
 # Add the project root to Python path for orchestrator import
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -16,7 +16,7 @@ import importlib
 
 # Global thread pool executor for CPU-bound training tasks
 # Max 2 concurrent trainings to prevent resource exhaustion
-training_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="training_")
+# training_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="training_")
 
 
 def normalize_component_name(name: str) -> str:
@@ -96,7 +96,7 @@ async def resume_training(train_run_id: str) -> Dict[str, Any]:
         # Start resume process
         asyncio.create_task(_run_resume_training(run, resume_from))
         
-        logger.info(f"Training resume started for run {train_run_id} from step: {resume_from}")
+        # logger.info(f"Training resume started for run {train_run_id} from step: {resume_from}")
         
         return {
             "train_run_id": train_run_id,
@@ -151,7 +151,7 @@ async def _run_resume_training(run: Dict[str, Any], resume_from: str) -> None:
             {
                 "$set": {
                     "status": "completed",
-                    "results": orchestrator_result,
+                    # "results": orchestrator_result,
                     "updated_at": datetime.utcnow(),
                     "ended_at": datetime.utcnow()
                 }
@@ -196,7 +196,8 @@ def _determine_resume_point(step_status: Dict[str, Any]) -> str:
         else:
             status = step_info  # Handle old format
         
-        if status in [None, "failed", "in_progress"]:
+        # Resume from first step that is not completed
+        if status not in ["completed"]:
             return step
         elif status == "completed":
             continue  # Skip completed steps
@@ -265,7 +266,11 @@ async def get_all_training_runs(project_id: str = None, status: str = None) -> L
             filter_query["train_config_id"] = {"$in": config_ids}
         
         if status:
-            filter_query["status"] = status
+            # Handle "in progress" filter to include both training and resuming
+            if status.lower() == "in progress" or status.lower() == "in_progress":
+                filter_query["status"] = {"$in": ["training", "resuming"]}
+            else:
+                filter_query["status"] = status
         
         runs = await train_runs.find(filter_query).sort("created_at", -1).to_list(length=None)
         
@@ -330,15 +335,6 @@ async def get_training_runs_for_config(train_config_id: str) -> List[Dict[str, A
         raise
 
 async def start_training(train_config_id: str) -> Dict[str, Any]:
-    """
-    Start training using the appropriate orchestrator based on train config.
-    
-    Args:
-        train_config_id: ID of the train configuration
-        
-    Returns:
-        Training results
-    """
     db = mongo_client.database
     train_configs = db[database_config["TRAIN_CONFIG_COLLECTION"]]
     train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
@@ -363,7 +359,6 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
         "ended_at": None,
     })
     if existing_run:
-        # Indicate training already running
         raise RuntimeError("training already running for this configuration")
 
     # Create train run record
@@ -377,7 +372,6 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
             "training": None,
             "saving_model": None
         },
-        # canonical S3 url fields (initialized as null)
         "input_weights_s3_url": None,
         "output_weights_s3_url": None,
         "output_logs_s3_url": None,
@@ -389,33 +383,62 @@ async def start_training(train_config_id: str) -> Dict[str, Any]:
     result = await train_runs.insert_one(run_doc)
     run_id = str(result.inserted_id)
 
-    try:
-        # Determine orchestrator based on train_config and call it
-        orchestrator_result = await _run_orchestrator(config, run_id)
-        
-        # Use the orchestrator dispatcher
-        training_results = orchestrator_result
-        
-        logger.info(f"Training completed successfully for config {train_config_id}")
-        return training_results
+    # 🔥 NEW: Start training in background task (don't await)
+    asyncio.create_task(_run_training_background(config, run_id))
 
-    except Exception as e:
-        # Update run as failed
+    # Return immediately
+    return {
+        "train_run_id": run_id,
+        "train_config_id": train_config_id,
+        "status": "training",
+        "message": "Training started successfully"
+    }
+
+async def _run_training_background(train_config: Dict[str, Any], train_run_id: str) -> None:
+    """
+    Run training in background without blocking API.
+    
+    Args:
+        train_config: Training configuration
+        train_run_id: Training run ID
+    """
+    try:
+        # Run the orchestrator
+        orchestrator_result = await _run_orchestrator(train_config, train_run_id)
+        
+        # Update final status to completed
+        db = mongo_client.database
+        train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
         await train_runs.update_one(
-            {"_id": ObjectId(run_id)},
+            {"_id": ObjectId(train_run_id)},
             {
                 "$set": {
-                    "status": "failed", 
-                    "error": str(e), 
-                    "updated_at": datetime.utcnow(), 
+                    "status": "completed",
+                    "updated_at": datetime.utcnow(),
                     "ended_at": datetime.utcnow()
                 }
             }
         )
-        logger.error(f"Training failed for config {train_config_id}: {str(e)}")
-        raise
-
-
+        
+        logger.info(f"Training completed successfully for run {train_run_id}")
+        
+    except Exception as e:
+        # Update run as failed
+        db = mongo_client.database
+        train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+        await train_runs.update_one(
+            {"_id": ObjectId(train_run_id)},
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": str(e),
+                    "updated_at": datetime.utcnow(),
+                    "ended_at": datetime.utcnow()
+                }
+            }
+        )
+        logger.error(f"Training failed for run {train_run_id}: {str(e)}")
+        
 async def _validate_train_config(config: Dict[str, Any]) -> None:
     
     # Check required fields
@@ -576,7 +599,7 @@ async def _run_orchestrator(train_config: Dict[str, Any], train_run_id: str) -> 
             
             # Call the orchestrator function with both train_config_id and train_run_id
             result = await orchestrator_function(train_config_id, train_run_id)
-            logger.info(f"{model_name} orchestrator completed successfully")
+            # logger.info(f"{model_name} orchestrator completed successfully")
             return result
             
         except (ImportError, AttributeError) as e:

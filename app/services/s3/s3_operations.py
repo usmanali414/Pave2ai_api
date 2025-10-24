@@ -152,7 +152,7 @@ class S3Operations:
             # Upload file
             response = s3_client.client.put_object(**upload_params)
             
-            logger.info(f"Successfully uploaded file to {s3_url}")
+            # logger.info(f"Successfully uploaded file to {s3_url}")
             
             return {
                 "success": True,
@@ -287,7 +287,6 @@ class S3Operations:
             if return_content:
                 result["content"] = file_content
             
-            logger.info(f"Successfully downloaded file from {s3_url}")
             return result
             
         except Exception as e:
@@ -404,7 +403,7 @@ class S3Operations:
                     files = files[:max_keys]  # Trim to max_keys
                     break
             
-            logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix} (iterations: {total_iterations})")
+            # logger.info(f"Listed {len(files)} files and {len(folders)} folders from {s3_url_prefix} (iterations: {total_iterations})")
             
             return {
                 "success": True,

@@ -3,13 +3,14 @@ RIEGL Parser for transferring data from S3 to local directories.
 """
 from pathlib import Path
 import os
-from pathlib import Path
 from typing import Dict, Any, List
+from tqdm import tqdm as tq
 from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
 from config import database_config
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
 from app.utils.logger_utils import logger
+import asyncio
 
 class RIEGL_PARSER():
     """RIEGL Parser for transferring images and annotations from S3 to local directories."""
@@ -35,7 +36,7 @@ class RIEGL_PARSER():
                 full_path = base_path / relative_path
                 full_path.mkdir(parents=True, exist_ok=True)
                 directories[key] = full_path
-                logger.info(f"Setup directory: {key} -> {full_path}")
+                # logger.info(f"Setup directory: {key} -> {full_path}")
             
         return directories
     
@@ -49,7 +50,7 @@ class RIEGL_PARSER():
         Returns:
             Dictionary containing transfer results and local paths
         """
-        logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
+        # logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
         
         try:
             # Get project info from train config
@@ -72,8 +73,8 @@ class RIEGL_PARSER():
             logger.info(f"Transferring annotations from: {annotate_label_url}")
             
             # Transfer images and annotations to local directories
-            image_paths = self._transfer_images_from_s3(preprocessed_data_url)
-            annotation_paths = self._transfer_annotations_from_s3(annotate_label_url)
+            image_paths = await self._transfer_images_from_s3(preprocessed_data_url)
+            annotation_paths = await self._transfer_annotations_from_s3(annotate_label_url)
             
             if not image_paths or not annotation_paths:
                 raise ValueError("No images or annotations transferred")
@@ -147,7 +148,7 @@ class RIEGL_PARSER():
             logger.error(f"Error validating data: {str(e)}")
             return False
     
-    def _transfer_images_from_s3(self, s3_base_url: str) -> List[str]:
+    async def _transfer_images_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer images from S3 to local directory.
         
@@ -166,20 +167,21 @@ class RIEGL_PARSER():
             if not list_result["success"]:
                 raise ValueError(f"Failed to list files in {s3_base_url}: {list_result['error']}")
             
-            
             # Use the configured images directory
             images_dir = self.directories["images_dir"]
-            jsons_dir = self.directories["jsons_dir"]
             
-            # Download images to local directory
-            for file_info in list_result["files"]:
+            # Download images to local directory with progress bar
+            files = list_result["files"]
+            
+            for file_info in tq(files, desc="Downloading images"):
                 try:
                     s3_url = file_info["s3_url"]
                     filename = file_info["key"].split('/')[-1]
                     local_path = images_dir / filename
                     
                     # Download file from S3
-                    result = self.s3_operations.download_file(
+                    result = await asyncio.to_thread(
+                        self.s3_operations.download_file,
                         s3_url=s3_url,
                         local_path=str(local_path)
                     )
@@ -189,7 +191,6 @@ class RIEGL_PARSER():
                         continue
                     
                     local_paths.append(str(local_path))
-                    logger.info(f"Successfully transferred image: {filename}")
                     
                 except Exception as e:
                     logger.error(f"Error transferring image from {file_info['s3_url']}: {str(e)}")
@@ -202,7 +203,7 @@ class RIEGL_PARSER():
             logger.error(f"Error transferring images from S3: {str(e)}")
             return local_paths
     
-    def _transfer_annotations_from_s3(self, s3_base_url: str) -> List[str]:
+    async def _transfer_annotations_from_s3(self, s3_base_url: str) -> List[str]:
         """
         Transfer JSON annotations from S3 to local directory.
         
@@ -234,8 +235,8 @@ class RIEGL_PARSER():
             # Use the configured JSONs directory
             jsons_dir = self.directories["jsons_dir"]
             
-            # Download annotations to local directory
-            for file_info in json_files:
+            # Download annotations to local directory with progress bar
+            for file_info in tq(json_files, desc="Downloading annotations"):
                 try:
                     s3_url = file_info["s3_url"]
                     filename = file_info["key"].split('/')[-1]
@@ -252,7 +253,6 @@ class RIEGL_PARSER():
                         continue
                     
                     local_paths.append(str(local_path))
-                    logger.info(f"Successfully transferred annotation: {filename}")
                     
                 except Exception as e:
                     logger.error(f"Error transferring annotation from {file_info['s3_url']}: {str(e)}")
