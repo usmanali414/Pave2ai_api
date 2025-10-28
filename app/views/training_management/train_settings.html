@@ -330,7 +330,7 @@
         if(!r.ok) return r.json().then(function(j){ throw new Error(j.detail || 'Failed to start training'); });
         return r.json();
       })
-      .then(function(data){ if(!data) return; showToast('Training completed', 'success'); resetTrainForm(); })
+      .then(function(data){ if(!data) return; showToast(data.message || 'Training started', 'success'); resetTrainForm(); })
       .catch(function(e){ showToast(e.message || 'Failed', 'error'); })
       .finally(function(){ if (spinner) spinner.classList.add('hidden'); if (btn) btn.disabled = !trainConfigSelect.value; });
   };

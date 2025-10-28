@@ -5,6 +5,9 @@ RIEGL_PARSER_CONFIG = {
         "images_dir": "orig_images",
         "jsons_dir": "jsons",
         "masks_dir": "masks",
-        "patches_dir": "split_patches_data"
+        "patches_dir": "split_patches_data",
+        "inference_base_dir": "amcnn_inference",
+        "inference_masks_dir": "masks",
+        "inference_overlays_dir": "overlays"
     }
 }

@@ -14,6 +14,7 @@ from app.controllers.v1.project_deletion.project_deletion import router as proje
 from app.controllers.v1.admin.admin import router as admin_router
 from app.controllers.v1.train.train import router as train_router
 from app.controllers.v1.train_config.train_config import router as train_config_router
+from app.controllers.v1.inference.inference import router as inference_router
 from app.database.conn import mongo_client
 from app.database.schema import ensure_collections_and_indexes
 
@@ -62,7 +63,7 @@ app.include_router(project_deletion_router, tags=["Project Deletion"])
 app.include_router(admin_router, tags=["Admin"])
 app.include_router(train_router, tags=["Train"])
 app.include_router(train_config_router, tags=["Train Config"])
-
+app.include_router(inference_router, tags=["Inference"])
 
 @app.get("/", include_in_schema=False)
 async def root_redirect():

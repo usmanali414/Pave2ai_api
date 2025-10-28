@@ -379,12 +379,12 @@ class AMCNNOrchestrator:
             await self._update_train_run_status(self.train_run_id, "saving_model", "completed")
             
             # Update S3 URLs and results
-            input_weights_url = self._get_initial_weights_path() + "/dummy_model_weights.h5"
+            input_weights_url = self._get_initial_weights_path() + "/amcnn_weights.h5"
             output_logs_url = self._get_logs_output_path()
             await self._update_train_run_s3_urls(self.train_run_id, input_weights_url, weights_path, output_logs_url)
             
             # Save training logs CSV URL
-            training_logs_csv_url = f"{output_logs_url}/experiment1_accumulated_checkpointV1.csv"
+            training_logs_csv_url = f"{output_logs_url}/amcnn_weights.csv"
             await self._update_train_run_results(self.train_run_id, training_logs_csv_url, "training")
             
            # New (NON-BLOCKING):
@@ -457,12 +457,12 @@ class AMCNNOrchestrator:
             await self._update_train_run_status(train_run_id, "saving_model", "completed")
             
             # Update S3 URLs
-            input_weights_url = self._get_initial_weights_path() + "/dummy_model_weights.h5"
+            input_weights_url = self._get_initial_weights_path() + "/amcnn_weights.h5"
             output_logs_url = training_config.get("logs_output_path", "")
             await self._update_train_run_s3_urls(train_run_id, input_weights_url, weights_path, output_logs_url)
             
             # Save training logs CSV URL
-            training_logs_csv_url = f"{output_logs_url}/experiment1_accumulated_checkpointV1.csv"
+            training_logs_csv_url = f"{output_logs_url}/amcnn_weights.csv"
             await self._update_train_run_results(train_run_id, training_logs_csv_url, "training")
             
             # Run evaluation
@@ -562,7 +562,7 @@ class AMCNNOrchestrator:
             if not output_base:
                 raise ValueError("Model output path not configured in bucket config")
             
-            weights_path = f"{output_base.rstrip('/')}/{self.train_run_id}/amcnn_v1_weights.h5"
+            weights_path = f"{output_base.rstrip('/')}/{self.train_run_id}/amcnn_weights.h5"
             return weights_path
             
         except Exception as e:
