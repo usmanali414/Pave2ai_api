@@ -354,8 +354,8 @@ class AMCNN():
                 logger.error("Model not initialized")
                 return False
             
-            local_temp_dir = tempfile.mkdtemp(prefix='amcnn_final_weights_')
-            weights_filename = "amcnn_v1_weights.h5"
+            local_temp_dir = tempfile.mkdtemp()
+            weights_filename = "amcnn_weights.h5"
             local_weights_path = os.path.join(local_temp_dir, weights_filename)
             
             # Save and upload
@@ -408,7 +408,7 @@ class AMCNN():
             # Upload only CSV (training history), skip .h5 checkpoint
             csv_file_path = os.path.join(self.modelpath, self.training_configs.modelname + '.csv')
             if os.path.exists(csv_file_path):
-                csv_s3_path = f"{self.s3_logs_path}/experiment1_accumulated_checkpointV1.csv"
+                csv_s3_path = f"{self.s3_logs_path}/amcnn_weights.csv"
                 # CHANGE TO (NON-BLOCKING):
                 await asyncio.to_thread(
                     self.s3_operations.upload_file, 
@@ -506,7 +506,7 @@ class AMCNN():
                 return False
             
             local_temp_dir = tempfile.mkdtemp(prefix='amcnn_initial_weights_')
-            initial_weights_filename = "dummy_model_weights.h5"
+            initial_weights_filename = "amcnn_weights.h5"
             local_weights_path = os.path.join(local_temp_dir, initial_weights_filename)
             
             # Save, upload, and load from local
@@ -613,7 +613,7 @@ class AMCNN():
             # Upload evaluation CSV to S3
             if eval_logs_s3_url:
                 eval_csv_s3_path = f"{eval_logs_s3_url}/evaluation_results.csv"
-                self.s3_operations.upload_file('./results.csv', eval_csv_s3_path)
+                self.s3_operations.upload_file('./evaluation_results.csv', eval_csv_s3_path)
             
             total_time = time.time() - start_time
             acc_str = f"{accuracy:.4f}" if accuracy is not None else "N/A"

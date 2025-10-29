@@ -31,7 +31,7 @@ class AMCNN_V1_CONFIG():
     class_folder_dict = {'0':0,'1':1,'2':2,'3':3,'4':4}
     epochs=1
     model_path = "model_Logs"
-    modelname = 'experiment1_accumulated_checkpointV1'
+    modelname = 'amcnn_weights'
     dataName = 'new_drmp'
     datatype='new'
     visible_device = "1"

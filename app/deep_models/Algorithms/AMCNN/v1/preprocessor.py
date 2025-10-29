@@ -106,230 +106,6 @@ class maskGenerate():
             except Exception as e:
                 logger.error(f"Error processing {file}: {e}")
                 continue
-            
-
-def get_padding_dims(base_patch_size,tile_size,image_size ) -> ('top_padding','bottom_padding','left_padding','right_padding'):
-
-    '''
-    base_patch_size:    'Int' basic patch size(/ by 10) that we are going to extract to input in model
-    tile_size:          'Int' Tile size to calculate padding to extract tile of any specific size.
-    image_size:         'Tuple' (Height, Width) Image height, Image width
-    '''
-
-    if base_patch_size%10 != 0 :
-        raise Exception("Patch size is not divisible by 10..!!!")
-    if tile_size%2 != 0 :
-        raise Exception("Tile size is not divisible by 10..!!!")
-
-    # if tile_size == base_patch_size:
-    #   return (0,0,0,0)
-
-    left_padding =  int((tile_size/2)-(base_patch_size/2))
-    top_padding  =  int((tile_size/2)-(base_patch_size/2))
-
-
-    H,W = image_size[0],image_size[1]
-
-    if int(H%base_patch_size) == 0:
-        bottom_padding = int((tile_size/2) - (int(base_patch_size/2)))
-    else:
-        bottom_padding = int((tile_size/2) - ((H%base_patch_size)/2))
-    if int(W%base_patch_size) == 0:
-        right_padding =  int((tile_size/2) - (int(base_patch_size/2)))
-    else:
-        right_padding = int((tile_size/2) - ((W%base_patch_size)/2))
-
-    return top_padding,bottom_padding,left_padding,right_padding
-
-def get_tile(row_index,col_index,base_patch_size,tile_size,padded_img,padding_tuple,padded_check=True):
-    x = (row_index*base_patch_size)+(base_patch_size/2)
-    y = (col_index*base_patch_size)+(base_patch_size/2)
-
-    half_tile_size = int(tile_size/2)
-    if padded_check == True:
-        top,bottom,left,right = padding_tuple
-        y = y+top
-        x = x+left
-
-    #print(y-half_tile_size,y+half_tile_size,   x-half_tile_size,x+half_tile_size)
-    #print(padded_img.shape)
-    tile = padded_img[int(y-half_tile_size):int(y+half_tile_size), int(x-half_tile_size):int(x+half_tile_size), :]
-    return tile
-
-def get_no_rows_cols(img_shape,base_patch_size):
-    img_h_col,img_w_row = img_shape[0],img_shape[1]
-    no_of_rows = int(img_w_row/base_patch_size)
-    if int(img_w_row%base_patch_size)!=0:
-        no_of_rows = int(img_w_row/base_patch_size)+1
-    no_of_cols = int(img_h_col/base_patch_size)
-    if int(img_h_col%base_patch_size)!=0:
-        no_of_cols = int(img_h_col/base_patch_size)+1
-    return no_of_rows,no_of_cols
-
-'''Input parameters tile size list and image. Return images with additional reuired padding '''
-def get_padded_imgs(img,image_size):
-
-    tile_sizes = ConfigurationDict['tile_sizes']
-    #image_size = ConfigurationDict['image_size']
-    base_patch_size = ConfigurationDict['base_patch_size']
-    padded_imgs_list = []
-    padding_tuples_list = []
-    #calculating padded images for each tile size
-    for i in range(len(tile_sizes)):
-        tilesize = tile_sizes[i]
-        top, bottom, left, right = get_padding_dims(base_patch_size,tilesize,image_size)
-        padding_tuples = (top, bottom, left, right)
-        padding_tuples_list.append(padding_tuples)
-        #print(top, bottom, left, right)
-        padded_image = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT,0)
-        padded_imgs_list.append(padded_image)
-    return padded_imgs_list,padding_tuples_list
-
-'''Tiles of different sizes'''
-def get_tiles_of_all_sizes(row_index1,col_index1,padded_imgs_list,padding_tuples_list):
-    tile_sizes = ConfigurationDict['tile_sizes']
-    base_patch_size = ConfigurationDict['base_patch_size']
-    tiles_list = []
-    #print('padded imgslist length',len(padded_imgs_list))
-    for i in range(len(tile_sizes)):
-        tilesize = tile_sizes[i]
-        tile = get_tile(row_index1,col_index1,base_patch_size,tilesize,padded_imgs_list[i],padding_tuples_list[i],padded_check=True)
-        tile = cv2.resize(tile,(base_patch_size,base_patch_size))
-        #tile = np.expand_dims(tile,axis=0)
-        tiles_list.append(tile)
-
-    return tiles_list
-
-
-
-
-def get_mask_tile_class(mask, color_code):
-    # Convert color_code values to tuples if they are in string format
-    for key in color_code:
-        if isinstance(color_code[key], str):
-            color_code[key] = eval(color_code[key])
-
-    # Calculate unique colors and their counts
-    colors, counts = np.unique(mask.reshape(-1, 3), axis=0, return_counts=True)
-    colors = colors[:, ::-1]
-
-    # If there's only 1 color, return its class directly
-    if len(colors) == 1:
-
-        most_frequent_color = tuple(colors[0])
-        return next((key for key, value in color_code.items() if value == most_frequent_color), None)
-
-    if len(colors) > 2:
-        #print('more than 2 colors',colors)
-        # Exclude class 0 and 1 colors for the decision
-        excluded_indices = [i for i, color in enumerate(colors) if tuple(color) in [color_code['0'], color_code['1']]]
-        colors = np.delete(colors, excluded_indices, axis=0)
-        counts = np.delete(counts, excluded_indices)
-
-    if len(colors) == 0:
-
-        return '1'  # Return class 1 if only class 0 and 1 colors were present and now excluded
-
-    # Find the index of the most frequent color after exclusions
-    max_index = np.argmax(counts)
-    most_frequent_color = tuple(colors[max_index])
-
-    # Match the most frequent color with the color code dictionary and return its class
-    for key, value in color_code.items():
-        if value == most_frequent_color:
-            return key
-
-    # If no match found, return None
-            return None
-    
-
-def save_tiles(all_size_tiles,target_dir,classcode,counter):
-    classpath = os.path.join(target_dir,str(classcode))
-    os.makedirs(classpath,exist_ok=True)
-    filename = os.path.join(classpath,str(counter)+'_'+ConfigurationDict['datatype']+'.npz')
-    np.savez(filename, alltiles=all_size_tiles)
-
-# ... (rest of your code)
-def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-    # Perform the processing for a single tile
-    all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-    masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
-    classcode = get_mask_tile_class(masktile, color_code)
-    save_tiles(all_size_tiles, target_dir, classcode, counter)
-
-def Save_image_patches_for_training(img_mappings, target_dir, color_code):
-
-    # ... (rest of your code)
-        #image_size = ConfigurationDict['image_size']
-    base_patch_size = ConfigurationDict['base_patch_size']
-
-    # if ConfigurationDict['same_size_images'] == True:
-    #     no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
-    #     #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-    # def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-    #   # Perform the processing for a single tile
-    #   all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-    #   masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
-    #   classcode = get_mask_tile_class(masktile, color_code)
-    #   save_tiles(all_size_tiles, target_dir, classcode, counter)
-
-    counter = np.int64(0)
-    cs_temp = 0
-    
-    # Progress bar for patch generation - single bar for entire dataset
-    subset_name = os.path.basename(target_dir)
-    # logger.info(f"Starting {subset_name} patch generation...")
-    
-    # Calculate total number of patches to process
-    total_patches = 0
-    for img_name_iter in range(len(img_mappings)):
-        img = cv2.imread(img_mappings[img_name_iter][0])
-        mask = cv2.imread(img_mappings[img_name_iter][1])
-        image_size = img.shape[:2]
-        no_of_rows, no_of_cols = get_no_rows_cols(image_size, base_patch_size)
-        total_patches += (no_of_rows - 1) * (no_of_cols - 1)
-    
-    # Single progress bar for the entire dataset
-    with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
-        for img_name_iter in range(len(img_mappings)):
-            # starttime = time.time() 
-            img = cv2.imread(img_mappings[img_name_iter][0])
-            #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
-            # print(img_mappings[img_name_iter][0])
-            # print(img_mappings[img_name_iter][1])
-            mask = cv2.imread(img_mappings[img_name_iter][1])
-            #print("Image number: ",cs_temp)
-            cs_temp+=1
-            # print(img.shape)
-            # print(mask.shape)
-            #if ConfigurationDict['same_size_images'] == False:
-            image_size = img.shape[:2]
-            no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
-              #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-
-            padded_imgs_list  ,  padding_tuples_list = get_padded_imgs(img,image_size)
-            
-            threads = []
-            with ThreadPoolExecutor() as executor:
-                '''Iterating over rows and cols tiles'''
-                for col_index1 in range(no_of_cols-1):
-                    for row_index1 in range(no_of_rows-1):
-                        thread = executor.submit(process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
-                        threads.append(thread)
-                        counter += 1
-
-            # Optionally wait for all tasks to complete and handle results/errors
-            for future in as_completed(threads):
-                try:
-                    result = future.result()  # You could return something useful here
-                    pbar.update(1)  # Update progress bar for each completed tile
-                except Exception as e:
-                    logger.error(f"Patch processing error: {e}")
-    
-    logger.info(f"✓ {subset_name} patch generation completed")
-    #print("time: ",time.time()-starttime )
-
-
 
 
 class RIEGLPreprocessor:
@@ -438,15 +214,15 @@ class RIEGLPreprocessor:
             # Generate patches for each split
             logger.info("Generating training patches...")
             target_dir = os.path.join(split_data_path,'train')
-            Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
+            self.Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
             
             logger.info("Generating validation patches...")
             target_dir = os.path.join(split_data_path,'val')
-            Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
+            self.Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
             
             logger.info("Generating test patches...")
             target_dir = os.path.join(split_data_path,'test')
-            Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
+            self.Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
             
             patch_generation_time = time.time() - patch_start_time
             logger.info(f"✓ Patches generated in {patch_generation_time:.1f}s")
@@ -458,3 +234,253 @@ class RIEGLPreprocessor:
         else:
             logger.warning("No image-annotation paths provided")
             return [], []
+        
+    def Save_image_patches_for_training(self, img_mappings, target_dir, color_code):
+
+        # ... (rest of your code)
+            #image_size = ConfigurationDict['image_size']
+        base_patch_size = ConfigurationDict['base_patch_size']
+
+        # if ConfigurationDict['same_size_images'] == True:
+        #     no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
+        #     #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
+        # def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+        #   # Perform the processing for a single tile
+        #   all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+        #   masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+        #   classcode = get_mask_tile_class(masktile, color_code)
+        #   save_tiles(all_size_tiles, target_dir, classcode, counter)
+
+        counter = np.int64(0)
+        cs_temp = 0
+        
+        # Progress bar for patch generation - single bar for entire dataset
+        subset_name = os.path.basename(target_dir)
+        # logger.info(f"Starting {subset_name} patch generation...")
+        
+        # Calculate total number of patches to process
+        total_patches = 0
+        for img_name_iter in range(len(img_mappings)):
+            img = cv2.imread(img_mappings[img_name_iter][0])
+            mask = cv2.imread(img_mappings[img_name_iter][1])
+            image_size = img.shape[:2]
+            no_of_rows, no_of_cols = self.get_no_rows_cols(image_size, base_patch_size)
+            total_patches += (no_of_rows - 1) * (no_of_cols - 1)
+        
+        # Single progress bar for the entire dataset
+        with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
+            for img_name_iter in range(len(img_mappings)):
+                # starttime = time.time() 
+                img = cv2.imread(img_mappings[img_name_iter][0])
+                #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
+                # print(img_mappings[img_name_iter][0])
+                # print(img_mappings[img_name_iter][1])
+                mask = cv2.imread(img_mappings[img_name_iter][1])
+                #print("Image number: ",cs_temp)
+                cs_temp+=1
+                # print(img.shape)
+                # print(mask.shape)
+                #if ConfigurationDict['same_size_images'] == False:
+                image_size = img.shape[:2]
+                no_of_rows , no_of_cols = self.get_no_rows_cols(image_size,base_patch_size)
+                #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
+
+                padded_imgs_list  ,  padding_tuples_list = self.get_padded_imgs(img,image_size)
+                
+                threads = []
+                with ThreadPoolExecutor() as executor:
+                    '''Iterating over rows and cols tiles'''
+                    for col_index1 in range(no_of_cols-1):
+                        for row_index1 in range(no_of_rows-1):
+                            thread = executor.submit(self.process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
+                            threads.append(thread)
+                            counter += 1
+
+                # Optionally wait for all tasks to complete and handle results/errors
+                for future in as_completed(threads):
+                    try:
+                        result = future.result()  # You could return something useful here
+                        pbar.update(1)  # Update progress bar for each completed tile
+                    except Exception as e:
+                        logger.error(f"Patch processing error: {e}")
+        
+        logger.info(f"✓ {subset_name} patch generation completed")
+        #print("time: ",time.time()-starttime )
+
+    def get_no_rows_cols(self,img_shape,base_patch_size):
+        img_h_col,img_w_row = img_shape[0],img_shape[1]
+        no_of_rows = int(img_w_row/base_patch_size)
+        if int(img_w_row%base_patch_size)!=0:
+            no_of_rows = int(img_w_row/base_patch_size)+1
+        no_of_cols = int(img_h_col/base_patch_size)
+        if int(img_h_col%base_patch_size)!=0:
+            no_of_cols = int(img_h_col/base_patch_size)+1
+        return no_of_rows,no_of_cols
+
+    '''Input parameters tile size list and image. Return images with additional reuired padding '''
+    def get_padded_imgs(self,img,image_size):
+
+        tile_sizes = ConfigurationDict['tile_sizes']
+        #image_size = ConfigurationDict['image_size']
+        base_patch_size = ConfigurationDict['base_patch_size']
+        padded_imgs_list = []
+        padding_tuples_list = []
+        #calculating padded images for each tile size
+        for i in range(len(tile_sizes)):
+            tilesize = tile_sizes[i]
+            top, bottom, left, right = self.get_padding_dims(base_patch_size,tilesize,image_size)
+            padding_tuples = (top, bottom, left, right)
+            padding_tuples_list.append(padding_tuples)
+            #print(top, bottom, left, right)
+            padded_image = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT,0)
+            padded_imgs_list.append(padded_image)
+        return padded_imgs_list,padding_tuples_list
+
+    def get_padding_dims(self,base_patch_size, tile_size, image_size ) -> ('top_padding','bottom_padding','left_padding','right_padding'):
+
+        '''
+        base_patch_size:    'Int' basic patch size(/ by 10) that we are going to extract to input in model
+        tile_size:          'Int' Tile size to calculate padding to extract tile of any specific size.
+        image_size:         'Tuple' (Height, Width) Image height, Image width
+        '''
+        
+        if base_patch_size%10 != 0 :
+            raise Exception("Patch size is not divisible by 10..!!!")
+        if tile_size%2 != 0 :
+            raise Exception("Tile size is not divisible by 10..!!!")
+        
+        # if tile_size == base_patch_size:
+        #   return (0,0,0,0)
+        
+        left_padding =  int((tile_size/2)-(base_patch_size/2))
+        top_padding  =  int((tile_size/2)-(base_patch_size/2))
+
+
+        H,W = image_size[0],image_size[1]
+        
+        if int(H%base_patch_size) == 0:
+            bottom_padding = top_padding
+        else:
+            bottom_padding = int((tile_size/2) - ((H%base_patch_size)/2))
+        if int(W%base_patch_size) == 0:
+            right_padding =  left_padding
+        else:
+            right_padding = int((tile_size/2) - ((W%base_patch_size)/2))
+        return top_padding,bottom_padding,left_padding,right_padding
+
+    '''Tiles of different sizes'''
+    def get_tiles_of_all_sizes(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list):
+        tile_sizes = ConfigurationDict['tile_sizes']
+        base_patch_size = ConfigurationDict['base_patch_size']
+        tiles_list = []
+        for i in range(len(tile_sizes)):
+            tilesize = tile_sizes[i]
+            tiles_or_tile = self.get_tile(
+                row_index1, col_index1, base_patch_size, tilesize,
+                padded_imgs_list[i], padding_tuples_list[i], padded_check=True
+            )
+            tile = tiles_or_tile
+            if isinstance(tile, list):
+                tile = tile[0] if len(tile) > 0 else None  # unwrap row dimension
+            if isinstance(tile, list):
+                tile = tile[0] if len(tile) > 0 else None  # unwrap size dimension
+            if tile is None or not isinstance(tile, np.ndarray):
+                logger.info(f"inference: bad tile from preprocessor i={i} type={type(tile)}")
+                continue
+            tile = cv2.resize(tile, (base_patch_size, base_patch_size))
+            tiles_list.append(tile)
+        return tiles_list
+
+    def get_mask_tile_class(self, mask, color_code):
+        # Convert color_code values to tuples if they are in string format
+        for key in color_code:
+            if isinstance(color_code[key], str):
+                color_code[key] = eval(color_code[key])
+
+        # Calculate unique colors and their counts
+        colors, counts = np.unique(mask.reshape(-1, 3), axis=0, return_counts=True)
+        colors = colors[:, ::-1]
+
+        # If there's only 1 color, return its class directly
+        if len(colors) == 1:
+
+            most_frequent_color = tuple(colors[0])
+            return next((key for key, value in color_code.items() if value == most_frequent_color), None)
+
+        if len(colors) > 2:
+            #print('more than 2 colors',colors)
+            # Exclude class 0 and 1 colors for the decision
+            excluded_indices = [i for i, color in enumerate(colors) if tuple(color) in [color_code['0'], color_code['1']]]
+            colors = np.delete(colors, excluded_indices, axis=0)
+            counts = np.delete(counts, excluded_indices)
+
+        if len(colors) == 0:
+
+            return '1'  # Return class 1 if only class 0 and 1 colors were present and now excluded
+
+        # Find the index of the most frequent color after exclusions
+        max_index = np.argmax(counts)
+        most_frequent_color = tuple(colors[max_index])
+
+        # Match the most frequent color with the color code dictionary and return its class
+        for key, value in color_code.items():
+            if value == most_frequent_color:
+                return key
+
+        # If no match found, return None
+                return None
+        
+
+    def save_tiles(self,all_size_tiles,target_dir,classcode,counter):
+        classpath = os.path.join(target_dir,str(classcode))
+        os.makedirs(classpath,exist_ok=True)
+        filename = os.path.join(classpath,str(counter)+'_'+ConfigurationDict['datatype']+'.npz')
+        np.savez(filename, alltiles=all_size_tiles)
+
+    # ... (rest of your code)
+    def process_tile(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+        # Perform the processing for a single tile
+        all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+        masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+        
+        # Extract the actual numpy array from the list structure
+        if isinstance(masktile_result, list) and len(masktile_result) > 0:
+            masktile = masktile_result[0]  # Get first row
+            if isinstance(masktile, list) and len(masktile) > 0:
+                masktile = masktile[0]  # Get first tile size
+        else:
+            masktile = masktile_result
+        
+        classcode = self.get_mask_tile_class(masktile, color_code)
+        self.save_tiles(all_size_tiles, target_dir, classcode, counter)
+        
+    def get_tile(self,row_index, col_index, base_patch_size, tile_size, padded_img, padding_tuple, padded_check=True):
+        # Ensure row_index is 1-D array even if scalar
+        row_index_arr = np.atleast_1d(row_index)
+        x = (row_index_arr * base_patch_size) + (base_patch_size / 2)
+        y = (col_index * base_patch_size) + (base_patch_size / 2)
+
+        if not isinstance(tile_size, list):
+            tile_size = [tile_size]
+        tile_size = np.array(tile_size)
+
+        if padded_check:
+            top, bottom, left, right = padding_tuple
+            y = y + top
+            x = x + left
+
+        half_tile_size = tile_size / 2
+        full_col_tiles = []
+        for k in range(len(row_index_arr)):
+            tiles_of_sizes = []
+            for i in range(len(tile_size)):
+                tile = padded_img[
+                    int(y - half_tile_size[i]) : int(y + half_tile_size[i]),
+                    int(x[k] - half_tile_size[i]) : int(x[k] + half_tile_size[i]),
+                    :
+                ]
+                tile = cv2.resize(tile, (base_patch_size, base_patch_size))
+                tiles_of_sizes.append(tile)
+            full_col_tiles.append(tiles_of_sizes)
+
+        return full_col_tiles
