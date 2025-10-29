@@ -22,10 +22,10 @@ import logging
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 # import tensorflow_addons as tfa  # Commented out for inference
-from tensorflow.keras.layers import GlobalAveragePooling2D,Reshape,Dense,Multiply,Conv2D,BatchNormalization
-from tensorflow.keras.layers import Activation,Add,MaxPooling2D,UpSampling2D,Concatenate,Input
-from tensorflow.keras.models import Model
-from tensorflow.keras import backend as K
+from tensorflow.keras.layers import GlobalAveragePooling2D,Reshape,Dense,Multiply,Conv2D,BatchNormalization # type: ignore
+from tensorflow.keras.layers import Activation,Add,MaxPooling2D,UpSampling2D,Concatenate,Input # type: ignore
+from tensorflow.keras.models import Model # type: ignore
+from tensorflow.keras import backend as K # type: ignore
 from app.deep_models.Algorithms.AMCNN.v1 import utils
 
 # #multigpu

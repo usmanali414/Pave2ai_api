@@ -49,32 +49,32 @@ async def load_bucket_config(project_id: str) -> dict:
     except Exception as e:
         raise Exception(str(e))
 
-async def trigger_inference(train_run_id: str, train_config_id: str):
+async def trigger_inference(train_run_id: str):
     """
     Non-blocking: spawns background task and returns immediately.
     """
-    if not train_run_id or not isinstance(train_run_id, str) or not train_config_id or not isinstance(train_config_id, str):
-        raise Exception("train_run_id and train_config_id are required and must be a string")
+    if not train_run_id or not isinstance(train_run_id, str):
+        raise Exception("train_run_id is required and must be a string")
 
     # Fire-and-forget background job
     logger.info(f"inference: schedule run_id={train_run_id}")
-    asyncio.create_task(_run_inference_background(train_run_id, train_config_id))
+    asyncio.create_task(_run_inference_background(train_run_id))
 
     return {
         "status": "started",
         "train_run_id": train_run_id,
-        "train_config_id": train_config_id,
         "message": "Inference started in background"
     }
 
-async def _run_inference_background(train_run_id: str, train_config_id: str):
+async def _run_inference_background(train_run_id: str):
     """
     Background pipeline:
-      1) Load config/run/bucket config
-      2) Download trained weights (output_weights_s3_url) → local temp
-      3) Upload same weights → folder_structure['inference_input_model']
-      4) Run model folder inference with local weights (non-blocking via to_thread)
-      5) Upload:
+      1) Load train_run from DB (contains train_config_id)
+      2) Load config/run/bucket config
+      3) Download trained weights (output_weights_s3_url) → local temp
+      4) Upload same weights → folder_structure['inference_input_model']
+      5) Run model folder inference with local weights (non-blocking via to_thread)
+      6) Upload:
          - weights → folder_structure['inference_output_labels']
          - masks → folder_structure['inference_output_metadata']/masks/<original>.png
          - labelized_images → .../labelized_images/<original>.png
@@ -86,6 +86,12 @@ async def _run_inference_background(train_run_id: str, train_config_id: str):
         # Load DB docs
         logger.info(f"inference: start run_id={train_run_id}")
         train_run = await get_training_run(train_run_id)
+        
+        # Extract train_config_id from train_run document
+        train_config_id = train_run.get("train_config_id")
+        if not train_config_id:
+            raise Exception("train_config_id not found in train_run document")
+        
         train_config = await get_train_config(train_config_id)
         bucket_config = await load_bucket_config(train_config.get("project_id"))
         folder_structure = (bucket_config.get("folder_structure") or {})

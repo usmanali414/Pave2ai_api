@@ -15,44 +15,160 @@ import asyncio
 class RIEGL_PARSER():
     """RIEGL Parser for transferring images and annotations from S3 to local directories."""
     
+    # def __init__(self):
+    #     self.s3_operations = S3Operations()
+    #     self.parser_config = RIEGL_PARSER_CONFIG
+    #     self.directories = self._setup_local_directories()
+    
+    # def _setup_local_directories(self) -> Dict[str, Path]:        
+    #     # Get the project root directory (go up from current file to project root)
+    #     current_file = Path(__file__)
+    #     project_root = current_file.parents[4]  # Go up 3 levels to reach project root
+        
+    #     # Setup paths using relative paths from project root
+    #     base_path = project_root / self.parser_config["local_storage"]["base_path"]
+        
+    #     # Create directories based on configuration
+    #     directories = {}
+        
+    #     for key, relative_path in self.parser_config["local_storage"].items():
+    #         if key != "base_path":  # Skip base_path itself
+    #             full_path = base_path / relative_path
+    #             full_path.mkdir(parents=True, exist_ok=True)
+    #             directories[key] = full_path
+    #             # logger.info(f"Setup directory: {key} -> {full_path}")
+            
+    #     return directories
+
     def __init__(self):
         self.s3_operations = S3Operations()
         self.parser_config = RIEGL_PARSER_CONFIG
-        self.directories = self._setup_local_directories()
-    
-    def _setup_local_directories(self) -> Dict[str, Path]:        
-        # Get the project root directory (go up from current file to project root)
+        # Do NOT setup directories here - wait for model context from train_config
+        self.directories = None
+
+    def _get_model_namespace_from_config(self, train_config: Dict[str, Any]) -> str:
+        """Build model-scoped path: static/{MODEL}/{version}"""
+        ls = self.parser_config["local_storage"]
+        md = (train_config.get("metadata") or {})
+        model_name = (md.get("model_name") or "AMCNN").strip().replace(" ", "_").upper()
+        model_version = (train_config.get("model_version") or "v1").strip().lower()
+        base = ls["base_path"]  # "static"
+        
+        # Get project root
         current_file = Path(__file__)
-        project_root = current_file.parents[4]  # Go up 3 levels to reach project root
+        project_root = current_file.parents[4]
+        base_path = project_root / base
         
-        # Setup paths using relative paths from project root
-        base_path = project_root / self.parser_config["local_storage"]["base_path"]
+        # Return model-scoped namespace: static/{MODEL}/{version}
+        return str(base_path / model_name / model_version)
+
+    def _setup_local_directories(self, train_config: Dict[str, Any]) -> Dict[str, Path]:
+        """Setup model-scoped local directories based on train_config."""
+        # Get project root
+        current_file = Path(__file__)
+        project_root = current_file.parents[4]
         
-        # Create directories based on configuration
+        # Build model-scoped base: static/{MODEL}/{version}
+        base_ns = Path(self._get_model_namespace_from_config(train_config))
+        
+        ls = self.parser_config["local_storage"]
         directories = {}
         
-        for key, relative_path in self.parser_config["local_storage"].items():
-            if key != "base_path":  # Skip base_path itself
-                full_path = base_path / relative_path
-                full_path.mkdir(parents=True, exist_ok=True)
-                directories[key] = full_path
-                # logger.info(f"Setup directory: {key} -> {full_path}")
-            
+        # Dataset directories under model namespace
+        dataset_dir = base_ns / ls["dataset_dir"]  # static/{MODEL}/{version}/dataset
+        directories["dataset_dir"] = dataset_dir
+        directories["images_dir"] = dataset_dir / ls["images_dir"]   # .../dataset/orig_images
+        directories["jsons_dir"] = dataset_dir / ls["jsons_dir"]     # .../dataset/jsons
+        directories["masks_dir"] = dataset_dir / ls["masks_dir"]     # .../dataset/masks
+        directories["patches_dir"] = dataset_dir / ls["patches_dir"]  # .../dataset/split_patches_data
+        
+        # Inference directories under model namespace
+        inf_base = base_ns / ls["inference_base_dir"]  # static/{MODEL}/{version}/inference
+        directories["inference_base_dir"] = inf_base
+        directories["inference_masks_dir"] = inf_base / ls["inference_masks_dir"]      # .../inference/masks
+        directories["inference_overlays_dir"] = inf_base / ls["inference_overlays_dir"] # .../inference/overlays
+        
+        # Create all directories
+        for dir_path in directories.values():
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
         return directories
     
+    # async def load_data(self, train_config: Dict[str, Any]) -> Dict[str, Any]:
+    #     """
+    #     Transfer data from S3 to local directories.
+        
+    #     Args:
+    #         train_config: Dictionary containing train configuration
+            
+    #     Returns:
+    #         Dictionary containing transfer results and local paths
+    #     """
+    #     # logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
+        
+    #     try:
+    #         # Get project info from train config
+    #         project_id = train_config.get("project_id")
+    #         tenant_id = train_config.get("tenant_id")
+    #         db = mongo_client.database
+    #         bucket_configs = db[database_config["BUCKET_CONFIG_COLLECTION"]]
+    #         bucket_config = await bucket_configs.find_one({"project_id": project_id, "tenant_id": tenant_id})
+    #         if not bucket_config:
+    #             raise ValueError(f"Bucket config not found for project: {project_id} and tenant: {tenant_id}")
+
+    #         folder_structure = bucket_config.get("folder_structure", {})
+    #         preprocessed_data_url = folder_structure.get("preprocessed_data", "")
+    #         annotate_label_url = folder_structure.get("annotate_label", "")
+            
+    #         if not preprocessed_data_url or not annotate_label_url:
+    #             raise ValueError(f"Required S3 URLs not found in bucket config. Missing: preprocessed_data={preprocessed_data_url}, annotate_label={annotate_label_url}")
+            
+    #         logger.info(f"Transferring images from: {preprocessed_data_url}")
+    #         logger.info(f"Transferring annotations from: {annotate_label_url}")
+            
+    #         # Transfer images and annotations to local directories
+    #         image_paths = await self._transfer_images_from_s3(preprocessed_data_url)
+    #         annotation_paths = await self._transfer_annotations_from_s3(annotate_label_url)
+            
+    #         if not image_paths or not annotation_paths:
+    #             raise ValueError("No images or annotations transferred")
+            
+    #         logger.info(f"Transferred {len(image_paths)} images and {len(annotation_paths)} annotations")
+            
+    #         return {
+    #             "image_paths": image_paths,
+    #             "annotation_paths": annotation_paths,
+    #             "project_id": project_id,
+    #             "tenant_id": tenant_id,
+    #             "s3_urls": {
+    #                 "preprocessed_data": preprocessed_data_url,
+    #                 "annotate_label": annotate_label_url
+    #             },
+    #             "local_directories": {
+    #                 "images_dir": str(self.directories["images_dir"]),
+    #                 "jsons_dir": str(self.directories["jsons_dir"])
+    #             }
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error transferring RIEGL data: {str(e)}")
+    #         raise
+
     async def load_data(self, train_config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Transfer data from S3 to local directories.
+        Transfer data from S3 to model-scoped local directories.
         
         Args:
-            train_config: Dictionary containing train configuration
+            train_config: Dictionary containing train configuration with metadata.model_name and model_version
             
         Returns:
-            Dictionary containing transfer results and local paths
+            Dictionary containing transfer results and model-scoped local paths
         """
-        # logger.info("RIEGL_PARSER.load_data() method called - transferring data from S3 to local directories")
-        
         try:
+            # Setup model-scoped directories based on train_config
+            self.directories = self._setup_local_directories(train_config)
+            base_ns = Path(self._get_model_namespace_from_config(train_config))
+            
             # Get project info from train config
             project_id = train_config.get("project_id")
             tenant_id = train_config.get("tenant_id")
@@ -69,30 +185,40 @@ class RIEGL_PARSER():
             if not preprocessed_data_url or not annotate_label_url:
                 raise ValueError(f"Required S3 URLs not found in bucket config. Missing: preprocessed_data={preprocessed_data_url}, annotate_label={annotate_label_url}")
             
-            logger.info(f"Transferring images from: {preprocessed_data_url}")
-            logger.info(f"Transferring annotations from: {annotate_label_url}")
+            model_name = (train_config.get("metadata") or {}).get("model_name", "AMCNN")
+            model_version = train_config.get("model_version", "v1")
+            logger.info(f"Transferring data for {model_name} {model_version} from: {preprocessed_data_url}")
+            logger.info(f"Target local path: {base_ns}")
             
-            # Transfer images and annotations to local directories
+            # Transfer images and annotations to model-scoped local directories
             image_paths = await self._transfer_images_from_s3(preprocessed_data_url)
             annotation_paths = await self._transfer_annotations_from_s3(annotate_label_url)
             
             if not image_paths or not annotation_paths:
                 raise ValueError("No images or annotations transferred")
             
-            logger.info(f"Transferred {len(image_paths)} images and {len(annotation_paths)} annotations")
+            logger.info(f"Transferred {len(image_paths)} images and {len(annotation_paths)} annotations to {base_ns}")
             
             return {
                 "image_paths": image_paths,
                 "annotation_paths": annotation_paths,
                 "project_id": project_id,
                 "tenant_id": tenant_id,
+                "model_name": model_name,
+                "model_version": model_version,
                 "s3_urls": {
                     "preprocessed_data": preprocessed_data_url,
                     "annotate_label": annotate_label_url
                 },
                 "local_directories": {
+                    "base_ns": str(base_ns),
+                    "dataset_dir": str(self.directories["dataset_dir"]),
                     "images_dir": str(self.directories["images_dir"]),
-                    "jsons_dir": str(self.directories["jsons_dir"])
+                    "jsons_dir": str(self.directories["jsons_dir"]),
+                    "masks_dir": str(self.directories["masks_dir"]),
+                    "patches_dir": str(self.directories["patches_dir"]),
+                    "inference_masks_dir": str(self.directories["inference_masks_dir"]),
+                    "inference_overlays_dir": str(self.directories["inference_overlays_dir"])
                 }
             }
             

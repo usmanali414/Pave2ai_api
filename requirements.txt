@@ -32,3 +32,9 @@ h5py>=3.10.0
 # Development and Jupyter
 jupyter-server==2.13.0
 beautifulsoup4==4.12.3
+# PyTorch and Detectron2
+torch
+torchvision
+git+https://github.com/facebookresearch/detectron2.git
+# COCO tools for instance segmentation
+pycocotools

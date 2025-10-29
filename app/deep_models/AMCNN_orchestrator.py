@@ -13,8 +13,6 @@ from bson import ObjectId
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.deep_models.base_interfaces import DataParser
-from app.deep_models.Algorithms.AMCNN.v1.AMCNN import AMCNN
 from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
 from config import database_config

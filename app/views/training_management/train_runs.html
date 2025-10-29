@@ -432,7 +432,13 @@
     actions.className = 'run-actions';
     
     if (run.status === 'completed'){
-      actions.innerHTML = '<button class="btn btn-view" disabled>✓ Completed</button>';
+      var btnContainer = document.createElement('div');
+      btnContainer.style.display = 'flex';
+      btnContainer.style.gap = '8px';
+      btnContainer.innerHTML = 
+        '<button class="btn btn-view" onclick="startInference(\'' + (run._id || run.train_run_id) + '\')" style="background: #8b5cf6; border-color: #8b5cf6; color: #fff;">🔮 Start Inference</button>' +
+        '<button class="btn" disabled>✓ Completed</button>';
+      actions.appendChild(btnContainer);
     } else if (run.status === 'failed'){
       // Determine resume step from step_status
       var resumeStep = 'failed step';
@@ -504,6 +510,37 @@
       .catch(function(e){
         console.error('Resume failed:', e);
         showToast(e.message || 'Failed to resume', 'error');
+      });
+  };
+
+  // Start inference
+  window.startInference = function(runId){
+    console.log('Attempting to start inference for runId:', runId);
+    if (!confirm('Start inference for this completed training run?')) return;
+    
+    showToast('Starting inference...', 'success');
+    
+    var url = '/infer?train_run_id=' + encodeURIComponent(runId);
+    console.log('Inference URL:', url);
+    
+    fetch(url, { method: 'POST' })
+      .then(function(r){
+        console.log('Inference response status:', r.status);
+        if (!r.ok){
+          return r.json().then(function(j){
+            throw new Error(j.detail || 'Failed to start inference');
+          });
+        }
+        return r.json();
+      })
+      .then(function(data){
+        console.log('Inference response data:', data);
+        if (!data) return;
+        showToast('Inference started successfully!', 'success');
+      })
+      .catch(function(e){
+        console.error('Inference failed:', e);
+        showToast(e.message || 'Failed to start inference', 'error');
       });
   };
 
