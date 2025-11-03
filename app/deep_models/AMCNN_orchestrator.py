@@ -18,6 +18,7 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.utils.logger_utils import logger
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
+from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
 import asyncio
 
 
@@ -56,6 +57,8 @@ class AMCNNOrchestrator:
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
             self.bucket_config = await self._load_bucket_config(self.train_config["project_id"])
+            # Set static root once for AMCNN paths
+            AMCNN_V1_CONFIG.set_static_root(Path(__file__).resolve().parents[2] / "static")
             
             # Load existing run to get current step status
             db = mongo_client.database
@@ -409,6 +412,8 @@ class AMCNNOrchestrator:
             self.train_run_id = train_run_id
             self.train_config = await self._load_train_config(train_config_id)
             self.bucket_config = await self._load_bucket_config(self.train_config["project_id"])
+            # Set static root once for AMCNN paths
+            AMCNN_V1_CONFIG.set_static_root(Path(__file__).resolve().parents[2] / "static")
             
             await self._update_train_run_status(train_run_id, "loading_data", "in_progress")
             
@@ -839,20 +844,26 @@ class AMCNNOrchestrator:
         except Exception as e:
             logger.error(f"Error updating train run S3 URLs: {str(e)}")
     
+    # def _get_dataset_path(self) -> str:
+    #     """Get the dataset path where patches are stored."""
+    #     try:
+    #         current_file = Path(__file__)
+    #         project_root = current_file.parents[2]
+    #         # Use config instead of hardcoding "static"
+    #         base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
+    #         dataset_path = project_root / base_path
+    #         return str(dataset_path)
+    #     except Exception as e:
+    #         logger.error(f"Error getting dataset path: {str(e)}")
+    #         # Fallback still uses config
+    #         base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
+    #         return os.path.join(os.getcwd(), base_path)
+
     def _get_dataset_path(self) -> str:
-        """Get the dataset path where patches are stored."""
-        try:
-            current_file = Path(__file__)
-            project_root = current_file.parents[2]
-            # Use config instead of hardcoding "static"
-            base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
-            dataset_path = project_root / base_path
-            return str(dataset_path)
-        except Exception as e:
-            logger.error(f"Error getting dataset path: {str(e)}")
-            # Fallback still uses config
-            base_path = RIEGL_PARSER_CONFIG["local_storage"]["base_path"]
-            return os.path.join(os.getcwd(), base_path)
+        """
+        AMCNN dataset root; matches the parser’s model namespace for AMCNN v1.
+        """
+        return str(AMCNN_V1_CONFIG.get_dataset_root())
     
     def _get_local_directory_path(self, dir_key: str) -> str:
         """

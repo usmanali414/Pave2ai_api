@@ -248,6 +248,8 @@ def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = 
         if save_overlay:
             overlay_path = os.path.join(overlays_dir, f"{base_name}_overlay.png")
             overlay = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2RGB)
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-GUI backend to avoid Tkinter errors
             import matplotlib.pyplot as plt
             plt.figure(figsize=(10, 5))
             plt.axis('off')

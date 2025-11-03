@@ -1,7 +1,7 @@
 import os, re, cv2
 import numpy as np
 import math
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger #type: ignore
 
 def check_imgfile_validity(folder, file):
     """Function to check if the files in the given path are valid image files.

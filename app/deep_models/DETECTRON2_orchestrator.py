@@ -1,7 +1,7 @@
 import os
 import asyncio
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import importlib
 from bson import ObjectId
@@ -9,7 +9,7 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.utils.logger_utils import logger
 from app.services.s3.s3_operations import S3Operations
-from app.deep_models.Algorithms.DETECTRON2.v1.config import DATASET_ROOT
+from app.deep_models.Algorithms.DETECTRON2.v1 import config as det2_config
 from app.deep_models.Algorithms.DETECTRON2.v1.DETECTRON2 import DETECTRON2
 
 # Data loader
@@ -121,9 +121,7 @@ class DETECTRON2Orchestrator:
         if not parser.validate_transferred_data(transferred):
             raise ValueError("Data validation failed after transfer")
         
-        # Inject paths into DETECTRON2 config for runtime use
-        from app.deep_models.Algorithms.DETECTRON2.v1 import config as det2_config
-        det2_config.set_runtime_paths(transferred["local_directories"])
+        # No runtime path injection; paths are derived from a static root set by orchestrator
         
         await self._update_step_status(train_run_id, "loading_data", "completed")
         return transferred
@@ -149,7 +147,7 @@ class DETECTRON2Orchestrator:
             await self._update_step_status(train_run_id, "preprocessing", "failed", {"error": str(e)})
             raise
 
-    async def _step_training(self, train_config: Dict[str, Any], bucket_cfg: Dict[str, Any], local_data: Dict[str, Any], train_run_id: str) -> Dict[str, Any]:
+    async def _step_training(self, train_config: Dict[str, Any], bucket_cfg: Dict[str, Any], local_data: Dict[str, Any], train_run_id: str, resume_flag: bool = False) -> Dict[str, Any]:
         """
         Execute DETECTRON2 training and upload artifacts to S3.
         Return dict with keys matching AMCNN’s result shape:
@@ -163,7 +161,10 @@ class DETECTRON2Orchestrator:
 
         fs = self._fs_paths_from_bucket(bucket_cfg)
         train_config = train_config.get("metadata", {})
-        initial_weights_flag = train_config.get("initial_weights", False)
+        # Support both keys; prefer load_initial_weights if present
+        initial_weights_flag = bool(
+            train_config.get("load_initial_weights", train_config.get("initial_weights", False))
+        )
         
         # Build S3 paths with proper handling of empty strings
         train_input_base = (fs.get('train_input_model') or '').rstrip('/')
@@ -171,14 +172,22 @@ class DETECTRON2Orchestrator:
         logs_base = (fs.get('train_output_metadata') or '').rstrip('/')
         
         initial_weights_s3 = f"{train_input_base}/{train_run_id}/detectron2_weights.pth" if train_input_base else ""
-        final_weights_s3 = f"{train_output_base}/{train_run_id}/detectron2_weights.pth" if train_output_base else ""
+        final_weights_s3 = f"{train_output_base}/{train_run_id}/model_final.pth" if train_output_base else ""
         logs_s3 = f"{logs_base}/{train_run_id}" if logs_base else ""
 
-        # Initialize model lazily (after paths are set in _step_loading_data)
-        if self.model is None:
-            self.model = DETECTRON2()
+        # OLD: in-process async/threaded training (blocked API or caused EventStorage issues)
+        # if self.model is None:
+        #     self.model = DETECTRON2()
+        # await self.model.train(initial_weights_flag, initial_weights_s3, final_weights_s3, logs_s3)
 
-        await self.model.train(initial_weights_flag, initial_weights_s3, final_weights_s3, logs_s3)
+        # NEW: run training in a separate process to avoid blocking and thread-local issues
+        from concurrent.futures import ProcessPoolExecutor
+        from functools import partial
+        from app.deep_models.Algorithms.DETECTRON2.v1.DETECTRON2 import run_training_in_process
+        loop = asyncio.get_running_loop()
+        fn = partial(run_training_in_process, initial_weights_flag, initial_weights_s3, final_weights_s3, logs_s3, resume_flag)
+        with ProcessPoolExecutor(max_workers=1) as pool:
+            await loop.run_in_executor(pool, fn)
 
         await self._update_step_status(train_run_id, "training", "completed")
 
@@ -217,6 +226,11 @@ async def run_detectron2_training(train_config_id: str, train_run_id: str) -> Di
     """
     orchestrator = DETECTRON2Orchestrator()
     logger.info(f"det2: start train config={train_config_id} run={train_run_id}")
+    # Set static root once to avoid runtime path conflicts
+    from pathlib import Path
+    here = Path(__file__).resolve()
+    repo_root = here.parents[2]
+    det2_config.set_static_root(repo_root / "static")
     train_config = await orchestrator._load_train_config(train_config_id)
     bucket_cfg = await orchestrator._load_bucket_config(train_config["project_id"])
 
@@ -228,10 +242,10 @@ async def run_detectron2_training(train_config_id: str, train_run_id: str) -> Di
         await orchestrator._step_preprocessing(train_config, bucket_cfg, local_data, train_run_id)
 
         # training
-        training_result = await orchestrator._step_training(train_config, bucket_cfg, local_data, train_run_id)
+        training_result = await orchestrator._step_training(train_config, bucket_cfg, local_data, train_run_id, resume_flag=False)
 
-        # # saving_model
-        # await orchestrator._step_saving_model(train_config, bucket_cfg, train_run_id, training_result)
+        # saving_model
+        await orchestrator._step_saving_model(train_config, bucket_cfg, train_run_id, training_result)
 
         logger.info(f"det2: completed run={train_run_id}")
         return {
@@ -245,12 +259,32 @@ async def run_detectron2_training(train_config_id: str, train_run_id: str) -> Di
         raise
 
 
-async def run_detectron2_training_with_resume(self, train_config_id: str, train_run_id: str, resume_from: str) -> Dict[str, Any]:
+async def run_detectron2_training_with_resume(train_config_id: str, train_run_id: str, resume_from: Optional[str] = None) -> Dict[str, Any]:
     """
     Entry point for DETECTRON2 resume training. Resume from any of:
       loading_data → preprocessing → training → saving_model
     """
     orchestrator = DETECTRON2Orchestrator()
+    # Ensure static root is set on resume as well
+    from pathlib import Path
+    here = Path(__file__).resolve()
+    repo_root = here.parents[2]
+    det2_config.set_static_root(repo_root / "static")
+    # Auto-detect resume step if not provided
+    if resume_from is None:
+        db = mongo_client.database
+        train_runs = db[database_config["TRAIN_RUN_COLLECTION"]]
+        tr = await train_runs.find_one({"_id": ObjectId(train_run_id)})
+        step_status = (tr or {}).get("step_status", {}) if tr else {}
+        ordered_steps = ["loading_data", "preprocessing", "training", "saving_model"]
+        for step in ordered_steps:
+            st = step_status.get(step)
+            if st is None or st in ("failed", "in_progress", "pending"):
+                resume_from = step
+                break
+        if resume_from is None:
+            resume_from = "saving_model"
+
     logger.info(f"det2: resume from={resume_from} config={train_config_id} run={train_run_id}")
     train_config = await orchestrator._load_train_config(train_config_id)
     bucket_cfg = await orchestrator._load_bucket_config(train_config["project_id"])
@@ -268,7 +302,7 @@ async def run_detectron2_training_with_resume(self, train_config_id: str, train_
             await orchestrator._step_preprocessing(train_config, bucket_cfg, local_data, train_run_id)
             resume_from = "training"
         if resume_from == "training":
-            training_result = await orchestrator._step_training(train_config, bucket_cfg, local_data or {}, train_run_id)
+            training_result = await orchestrator._step_training(train_config, bucket_cfg, local_data or {}, train_run_id, resume_flag=True)
             resume_from = "saving_model"
         if resume_from == "saving_model":
             await orchestrator._step_saving_model(train_config, bucket_cfg, train_run_id, locals().get("training_result", {}))

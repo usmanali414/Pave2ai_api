@@ -75,7 +75,9 @@ def run_inference(weights="model_final.pth", images_dir=None, out_dir="viz_insta
     Run inference on images and save predictions.
     
     Args:
-        weights (str): Name of weights file in OUTPUT_DIR (e.g., "model_final.pth")
+        weights (str): Path to weights file. Can be:
+            - Absolute path (e.g., "/tmp/model_final.pth")
+            - Relative filename in OUTPUT_DIR (e.g., "model_final.pth")
         images_dir (str/Path): Directory containing images to process. If None, uses DATASET_ROOT/IMAGES_SUBDIR
         out_dir (str/Path): Output directory for visualizations and predictions
     
@@ -87,15 +89,19 @@ def run_inference(weights="model_final.pth", images_dir=None, out_dir="viz_insta
     else:
         images_dir = Path(images_dir)
     
-    out_dir = Path(out_dir)
+    out_dir = get_output_dir() / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # Check if weights exist
-    weights_path = get_output_dir() / "detectron2_weights.pth"
+    # Check if weights exist - handle both absolute and relative paths
+    if os.path.isabs(weights):
+        weights_path = Path(weights)
+    else:
+        weights_path = get_output_dir() / weights
+    
     if not weights_path.exists():
         raise FileNotFoundError(
             f"Model weights not found: {weights_path}\n"
-            f"Please train the model first using train_instance.py"
+            f"Please train the model first or provide valid weights path"
         )
     
     print("="*80)
@@ -199,10 +205,11 @@ def run_inference(weights="model_final.pth", images_dir=None, out_dir="viz_insta
     return results
 
 
-def main(weights="model_final.pth", out_dir="viz_instances"):
+def run_folder_inference(weights: str = "model_final.pth", out_dir: str = "viz_instances"):
+    print(f"Running inference of det2")
     """Main function for command-line usage."""
     return run_inference(weights=weights, out_dir=out_dir)
 
 
 if __name__ == "__main__":
-    main()
+    run_folder_inference(weights="model_final.pth", out_dir="viz_instances")

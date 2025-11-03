@@ -608,12 +608,14 @@ class AMCNN():
             if accuracy is not None:
                 evaluation_dict['Accuracy'] = accuracy
 
-            self._write_eval_csv('./results.csv', evaluation_dict)
+            self._write_eval_csv('./evaluation_results.csv', evaluation_dict)
             
             # Upload evaluation CSV to S3
             if eval_logs_s3_url:
                 eval_csv_s3_path = f"{eval_logs_s3_url}/evaluation_results.csv"
-                self.s3_operations.upload_file('./evaluation_results.csv', eval_csv_s3_path)
+                upload = self.s3_operations.upload_file('./evaluation_results.csv', eval_csv_s3_path)
+                if not upload or not upload.get("success"):
+                    logger.error(f"Failed to upload evaluation CSV to {eval_csv_s3_path}")
             
             total_time = time.time() - start_time
             acc_str = f"{accuracy:.4f}" if accuracy is not None else "N/A"

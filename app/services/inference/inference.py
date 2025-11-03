@@ -132,7 +132,89 @@ async def _run_inference_background(train_run_id: str):
         #    This writes local masks/overlays into static/amcnn_inference/...
         #    Returns: {"results":[{"image", "mask_path", "overlay_path"}, ...], "masks_dir", "overlays_dir"}
         logger.info("inference: folder inference begin")
-        inf_result = await asyncio.to_thread(run_folder_inference, None, True, local_weights_path)
+        # inf_result = await asyncio.to_thread(run_folder_inference, None, True, local_weights_path)
+        def _run_any_inference(inference_module, local_weights_path, model_name_str, images_dir=None, out_dir="viz_instances"):
+            # For Detectron2: use run_inference directly (it now accepts absolute paths)
+            if model_name_str.upper() == "DETECTRON2" and hasattr(inference_module, "run_inference"):
+                from pathlib import Path
+                from app.deep_models.Algorithms.DETECTRON2.v1.config import get_output_dir
+                
+                # Pass absolute path directly - Detectron2's run_inference now handles it
+                result_list = inference_module.run_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    images_dir=images_dir,
+                    out_dir=out_dir,
+                )
+                
+                # Transform Detectron2 results to match expected format
+                # Detectron2 saves visualizations as {image_stem}_pred.png in out_dir
+                det2_out_dir = Path(get_output_dir()) / out_dir
+                transformed_results = []
+                
+                if isinstance(result_list, list):
+                    for pred_dict in result_list:
+                        # Detectron2 returns dicts with "file_name" key
+                        file_name = pred_dict.get("file_name", "")
+                        if not file_name:
+                            continue
+                        
+                        # Build paths
+                        image_path = str(Path(images_dir) / file_name) if images_dir else None
+                        overlay_path = str(det2_out_dir / f"{Path(file_name).stem}_pred.png")
+                        
+                        # Detectron2 doesn't generate separate masks, use overlay as both
+                        mask_path = overlay_path  # Same as overlay for Detectron2
+                        
+                        transformed_results.append({
+                            "image": image_path,
+                            "mask_path": mask_path if Path(overlay_path).exists() else None,
+                            "overlay_path": overlay_path if Path(overlay_path).exists() else None
+                        })
+                
+                return {
+                    "results": transformed_results
+                }
+            # For AMCNN: use run_folder_inference with correct signature
+            if model_name_str.upper() == "AMCNN" and hasattr(inference_module, "run_folder_inference"):
+                return inference_module.run_folder_inference(
+                    images_dir=images_dir,
+                    save_overlay=True,
+                    weights_local_path=str(local_weights_path),  # absolute path
+                )
+            # For other models: use run_inference if available
+            if hasattr(inference_module, "run_inference"):
+                return inference_module.run_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    images_dir=images_dir,
+                    out_dir=out_dir,
+                )
+            # Fallback to run_folder_inference for other models
+            if hasattr(inference_module, "run_folder_inference"):
+                return inference_module.run_folder_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    out_dir=out_dir,
+                )
+            # Last resort generic 'infer(weights_path)'
+            if hasattr(inference_module, "infer"):
+                return inference_module.infer(str(local_weights_path))
+            raise RuntimeError("No supported inference entry found in module")
+
+        # Resolve images_dir from model config when available
+        images_dir = None
+        try:
+            if model_name.upper() == "DETECTRON2":
+                from app.deep_models.Algorithms.DETECTRON2.v1.config import get_images_dir as d2_get_images_dir
+                images_dir = str(d2_get_images_dir())
+            elif model_name.upper() == "AMCNN":
+                from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
+                images_dir = str(AMCNN_V1_CONFIG.get_images_dir())
+        except Exception:
+            images_dir = None
+
+        # Use the adapter (works for current and future models)
+        inf_result = await asyncio.to_thread(
+            _run_any_inference, inference_module, local_weights_path, model_name, images_dir, "viz_instances"
+        )
         logger.info("inference: folder inference done")
 
         # 4) Upload final weights snapshot to inference_output_labels

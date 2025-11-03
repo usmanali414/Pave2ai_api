@@ -9,6 +9,7 @@ from app.services.s3.s3_operations import S3Operations
 from app.database.conn import mongo_client
 from config import database_config
 from app.deep_models.data_parser.RIEGL_PARSER.config import RIEGL_PARSER_CONFIG
+from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
 from app.utils.logger_utils import logger
 import asyncio
 
@@ -46,21 +47,41 @@ class RIEGL_PARSER():
         # Do NOT setup directories here - wait for model context from train_config
         self.directories = None
 
+    # def _get_model_namespace_from_config(self, train_config: Dict[str, Any]) -> str:
+    #     """Build model-scoped path: static/{MODEL}/{version}"""
+    #     ls = self.parser_config["local_storage"]
+    #     md = (train_config.get("metadata") or {})
+    #     model_name = (md.get("model_name") or "AMCNN").strip().replace(" ", "_").upper()
+    #     model_version = (train_config.get("model_version") or "v1").strip().lower()
+    #     base = ls["base_path"]  # "static"
+        
+    #     # Get project root
+    #     current_file = Path(__file__)
+    #     project_root = current_file.parents[4]
+    #     base_path = project_root / base
+        
+    #     # Return model-scoped namespace: static/{MODEL}/{version}
+    #     return str(base_path / model_name / model_version)
+
     def _get_model_namespace_from_config(self, train_config: Dict[str, Any]) -> str:
-        """Build model-scoped path: static/{MODEL}/{version}"""
+        """
+        Resolve model-scoped local root. For AMCNN v1, use its dataset_config['base_path'] exactly.
+        Otherwise, default to static/{MODEL}/{version}.
+        """
         ls = self.parser_config["local_storage"]
         md = (train_config.get("metadata") or {})
         model_name = (md.get("model_name") or "AMCNN").strip().replace(" ", "_").upper()
         model_version = (train_config.get("model_version") or "v1").strip().lower()
-        base = ls["base_path"]  # "static"
-        
-        # Get project root
+
         current_file = Path(__file__)
         project_root = current_file.parents[4]
-        base_path = project_root / base
-        
-        # Return model-scoped namespace: static/{MODEL}/{version}
-        return str(base_path / model_name / model_version)
+
+        if model_name == "AMCNN" and model_version == "v1":
+            amcnn_base = AMCNN_V1_CONFIG.dataset_config["base_path"]  # e.g., "static/AMCNN/v1/dataset"
+            return str(project_root / amcnn_base)
+
+        base = ls["base_path"]  # default "static"
+        return str((project_root / base) / model_name / model_version)
 
     def _setup_local_directories(self, train_config: Dict[str, Any]) -> Dict[str, Path]:
         """Setup model-scoped local directories based on train_config."""
@@ -75,7 +96,11 @@ class RIEGL_PARSER():
         directories = {}
         
         # Dataset directories under model namespace
-        dataset_dir = base_ns / ls["dataset_dir"]  # static/{MODEL}/{version}/dataset
+        md = (train_config.get("metadata") or {})
+        model_name = (md.get("model_name") or "AMCNN").strip().replace(" ", "_").upper()
+        # DETECTRON2 does not use an extra 'dataset' layer; AMCNN does
+        dataset_dir_name = "" if model_name == "DETECTRON2" else (ls.get("dataset_dir") or "dataset")
+        dataset_dir = base_ns if dataset_dir_name == "" else (base_ns / dataset_dir_name)
         directories["dataset_dir"] = dataset_dir
         directories["images_dir"] = dataset_dir / ls["images_dir"]   # .../dataset/orig_images
         directories["jsons_dir"] = dataset_dir / ls["jsons_dir"]     # .../dataset/jsons

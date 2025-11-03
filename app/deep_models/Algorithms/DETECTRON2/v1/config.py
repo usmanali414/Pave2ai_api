@@ -32,64 +32,50 @@ from typing import Optional, Dict
 # RUNTIME DATA PATHS - Set by orchestrator after RIEGL_PARSER.load_data()
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Runtime paths (injected by DETECTRON2_orchestrator after data transfer)
-_RUNTIME_DATASET_ROOT: Optional[Path] = None
-_RUNTIME_IMAGES_DIR: Optional[Path] = None
-_RUNTIME_JSONS_DIR: Optional[Path] = None
-_RUNTIME_MASKS_DIR: Optional[Path] = None
+# Add near the top
+from pathlib import Path
+from typing import Optional, Dict
 
-def set_runtime_paths(local_directories: Dict[str, str]):
-    """
-    Set paths from RIEGL_PARSER output. Called by orchestrator after load_data().
-    
-    Args:
-        local_directories: Dict from RIEGL_PARSER.load_data() return value
-                          Contains: base_ns, dataset_dir, images_dir, jsons_dir, masks_dir, patches_dir
-    """
-    global _RUNTIME_DATASET_ROOT, _RUNTIME_IMAGES_DIR, _RUNTIME_JSONS_DIR, _RUNTIME_MASKS_DIR
-    _RUNTIME_DATASET_ROOT = Path(local_directories["dataset_dir"])
-    _RUNTIME_IMAGES_DIR = Path(local_directories["images_dir"])
-    _RUNTIME_JSONS_DIR = Path(local_directories["jsons_dir"])
-    _RUNTIME_MASKS_DIR = Path(local_directories.get("masks_dir", ""))
+_STATIC_ROOT: Optional[Path] = None  # E:/Pave2ai_api/static
 
-# Use runtime paths if set, fallback to default if not (for testing/standalone)
-# Add getter functions so preprocessor always uses runtime-injected paths
+def set_static_root(root: Path):
+    global _STATIC_ROOT
+    _STATIC_ROOT = root
+
+def _default_static_root() -> Path:
+    here = Path(__file__).resolve()
+    # robust default: repo_root/static
+    repo_root = here.parents[5] if len(here.parents) >= 6 else here.parents[-1]
+    return repo_root / "static"
+
+def get_static_root() -> Path:
+    return _STATIC_ROOT or _default_static_root()
+
+# Hardcode the model layout relative to static root (no 'dataset' level)
+MODEL_NS = Path("DETECTRON2") / "v1"
+IMAGES_SUBDIR = "orig_images"
+MASKS_SUBDIR  = "masks"
+JSON_SUBDIR   = "jsons"
+ANNOTATIONS_DIR = "annotations"
+OUTPUT_DIR = "output_instances"
+
 def get_dataset_root() -> Path:
-    """Get dataset root - uses runtime path if set, otherwise fallback."""
-    return _RUNTIME_DATASET_ROOT if _RUNTIME_DATASET_ROOT else Path(__file__).parent / "Dataset"
+    return get_static_root() / MODEL_NS
 
 def get_images_dir() -> Path:
-    """Get images directory - uses runtime path if set, otherwise fallback."""
-    if _RUNTIME_IMAGES_DIR:
-        return _RUNTIME_IMAGES_DIR
     return get_dataset_root() / IMAGES_SUBDIR
 
 def get_jsons_dir() -> Path:
-    """Get jsons directory - uses runtime path if set, otherwise fallback."""
-    if _RUNTIME_JSONS_DIR:
-        return _RUNTIME_JSONS_DIR
     return get_dataset_root() / JSON_SUBDIR
 
 def get_masks_dir() -> Path:
-    """Get masks directory - uses runtime path if set, otherwise fallback."""
-    if _RUNTIME_MASKS_DIR:
-        return _RUNTIME_MASKS_DIR
     return get_dataset_root() / MASKS_SUBDIR
 
 def get_annotations_dir() -> Path:
-    """Get annotations directory - always relative to dataset root."""
     return get_dataset_root() / ANNOTATIONS_DIR
 
 def get_output_dir() -> Path:
-    """Get output directory - always relative to dataset root."""
     return get_dataset_root() / OUTPUT_DIR
-
-# Keep this for backward compatibility (but it will use runtime paths if set)
-DATASET_ROOT = get_dataset_root()  # This will be evaluated at import time, but preprocessor should use getter
-
-IMAGES_SUBDIR = "orig_images"    # Relative to DATASET_ROOT (path already includes this)
-MASKS_SUBDIR  = "masks"           # Relative to DATASET_ROOT (path already includes this)
-JSON_SUBDIR = "jsons"  
 # TRAIN/VAL SPLIT - How to divide your data
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -154,6 +140,7 @@ MODEL_ZOO_CONFIG = "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
 # Training hyperparameters
 # OPTIMIZED FOR YOUR DATASET: 1900 train + 700 val images
 MAX_ITER = 15000         # Total training iterations (~16 epochs)
+# MAX_ITER = 5         # Total training iterations (~16 epochs)
                          # Your dataset: 1900 images ÷ 2 batch = 950 iter/epoch
                          # 16 epochs = 15,200 iterations (good for your dataset size)
 
@@ -161,14 +148,18 @@ BASE_LR = 0.00025        # Learning rate (good starting point)
                          # Can reduce to 0.0001 if training is unstable
 
 IMS_PER_BATCH = 2        # Batch size (images processed together)
+# IMS_PER_BATCH = 1        # Batch size (images processed together)
                          # Your images are large (2150×3406), so keep at 2
                          # Reduce to 1 if GPU memory issues
 
 WARMUP_ITERS = 500       # Learning rate warmup iterations (~0.5 epochs)
+# WARMUP_ITERS = 50       # Learning rate warmup iterations (~0.5 epochs)
 STEPS = [10000, 13000]   # Learning rate decay steps (at 10.5 and 13.7 epochs)
+# STEPS = []   # Learning rate decay steps (at 10.5 and 13.7 epochs)
 
-# Data loading
+# Data loadingD
 NUM_WORKERS = 2          # Parallel data loading workers
+# NUM_WORKERS = 0        # Parallel data loading workers
 
 # ROI settings
 BATCH_SIZE_PER_IMAGE = 256   # RPN/ROI sampler batch size
@@ -179,6 +170,8 @@ ROI_HEADS_NUM_CLASSES = len(CATEGORIES)  # Number of classes (auto-set)
 # Checkpointing and evaluation
 CHECKPOINT_PERIOD = 1000   # Save checkpoint every N iterations (~1 epoch)
 EVAL_PERIOD = 1000         # Evaluate on validation set every N iterations (~1 epoch)
+# CHECKPOINT_PERIOD = 200   # Save checkpoint every N iterations (~1 epoch)
+# EVAL_PERIOD = 200         # Evaluate on validation set every N iterations (~1 epoch)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # INFERENCE PARAMETERS - Control prediction behavior
