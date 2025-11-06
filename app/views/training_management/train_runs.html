@@ -678,32 +678,45 @@
   //     });
   // }
 
-  // Auto-refresh for in-progress runs
-  function autoRefresh(){
+  // Auto-refresh for in-progress runs (debounced, backoff, tab-aware)
+  var refreshTimerId = null;
+  var ACTIVE_REFRESH_MS = 30000; // 30s to reduce UI churn
+  
+  function scheduleAutoRefresh(){
+    if (refreshTimerId) {
+      clearTimeout(refreshTimerId);
+      refreshTimerId = null;
+    }
+    // Only refresh when tab is visible to the user
+    if (document.hidden) return;
     var hasInProgress = currentRuns.some(function(r){ 
       return r.status === 'training' || r.status === 'resuming'; 
     });
-    if (hasInProgress){
-      setTimeout(function(){ 
-        loadTrainRuns(); 
-        // Update progress for in-progress runs
-        currentRuns.forEach(function(run) {
-          if (run.status === 'training' || run.status === 'resuming') {
-            updateProgressIndicators(run._id || run.train_run_id);
-          }
-        });
-      }, 10000); // Refresh every 10 seconds
-    }
+    if (!hasInProgress) return; // don't keep reloading when idle
+    refreshTimerId = setTimeout(function(){
+      loadTrainRuns();
+      // Chain next refresh after this one completes
+      scheduleAutoRefresh();
+    }, ACTIVE_REFRESH_MS);
   }
+  
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) {
+      // When user returns to tab, refresh once and reschedule
+      loadTrainRuns();
+      scheduleAutoRefresh();
+    } else if (refreshTimerId) {
+      clearTimeout(refreshTimerId);
+      refreshTimerId = null;
+    }
+  });
   
   // Initial load
   loadProjects();
   loadTrainRuns();
   
-  // Set up auto-refresh
-  setInterval(function(){
-    autoRefresh();
-  }, 10000);
+  // Set up auto-refresh (single debounced loop)
+  scheduleAutoRefresh();
 })();
 </script>
 {% endblock %}

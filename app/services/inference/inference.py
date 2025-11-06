@@ -7,6 +7,8 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.services.s3.s3_operations import S3Operations
 from app.utils.logger_utils import logger
+from pathlib import Path
+from app.deep_models.Algorithms.DETECTRON2.v1.config import get_output_dir
 
 def normalize_component_name(name: str) -> str:
     if not name:
@@ -228,6 +230,30 @@ async def _run_inference_background(train_run_id: str):
         results = inf_result.get("results", []) if isinstance(inf_result, dict) else []
         uploaded_masks = 0
         uploaded_overlays = 0
+
+        # Upload DETECTRON2 files once (outside loop)
+        if model_name.upper() == "DETECTRON2":
+            try:
+                det2_out_dir = Path(get_output_dir()) / "viz_instances"
+                s3_base = f"{inference_output_metadata.rstrip('/')}/{train_run_id}"
+
+                # Upload predictions.json once
+                predictions_json_path = det2_out_dir / "predictions.json"
+                if predictions_json_path.exists():
+                    await asyncio.to_thread(s3.upload_file, str(predictions_json_path), f"{s3_base}/predictions.json")
+                    logger.info("inference: uploaded predictions.json")
+
+                # Upload all PNG overlays once
+                png_count = 0
+                for png_path in det2_out_dir.glob("*.png"):
+                    await asyncio.to_thread(s3.upload_file, str(png_path), f"{s3_base}/{png_path.name}")
+                    png_count += 1
+                if png_count > 0:
+                    logger.info(f"inference: uploaded {png_count} DETECTRON2 PNG overlays to predictions dir")
+            except Exception as e:
+                logger.error(f"inference: failed to upload DETECTRON2 files: {e}")
+
+        # Process AMCNN results (per-item loop)
         for item in results:
             img_path = item.get("image")
             mask_path = item.get("mask_path")
@@ -237,20 +263,24 @@ async def _run_inference_background(train_run_id: str):
                 continue
             base = os.path.splitext(os.path.basename(img_path))[0]
 
-            # {run_id}/masks/<original>.png
-            if mask_path and os.path.exists(mask_path):
-                s3_mask = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/masks/{base}.png"
-                await asyncio.to_thread(s3.upload_file, mask_path, s3_mask)
-                uploaded_masks += 1
+            if model_name.upper() == "AMCNN":
+                try:
+                    if mask_path and os.path.exists(mask_path):
+                        s3_mask = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/masks/{base}.png"
+                        await asyncio.to_thread(s3.upload_file, mask_path, s3_mask)
+                        uploaded_masks += 1
 
-            # {run_id}/labelized_images/<original>.png
-            if overlay_path and os.path.exists(overlay_path):
-                s3_overlay = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/labelized_images/{base}.png"
-                await asyncio.to_thread(s3.upload_file, overlay_path, s3_overlay)
-                uploaded_overlays += 1
-        logger.info(f"inference: uploaded masks={uploaded_masks} overlays={uploaded_overlays}")
+                    if overlay_path and os.path.exists(overlay_path):
+                        s3_overlay = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/labelized_images/{base}.png"
+                        await asyncio.to_thread(s3.upload_file, overlay_path, s3_overlay)
+                        uploaded_overlays += 1
+                except Exception as e:
+                    logger.error(f"inference: failed to upload AMCNN masks: {e}")
+
+        # logger.info(f"inference: uploaded masks={uploaded_masks} overlays={uploaded_overlays}")
         logger.info(f"inference: complete run_id={train_run_id}")
-        
+            # else:
+            #     logger.error(f"inference: AMCNN not found: {model_name}")
     except Exception as e:
         logger.error(f"inference: failed run_id={train_run_id} error={str(e)}")
         pass

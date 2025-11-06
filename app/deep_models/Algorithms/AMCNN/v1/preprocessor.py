@@ -172,14 +172,14 @@ class RIEGLPreprocessor:
             start_time = time.time()
             
             # Step 2: Generate masks using the mask generator
-            logger.info("Step 1/2: Generating masks from annotations...")
+            logger.info("\nStep 1/2: Generating masks from annotations...")
             self.mask_generator.create_masks(json_folder_path, outputpath, orig_imgs_path)
             
             mask_generation_time = time.time() - start_time
-            logger.info(f"✓ Masks generated in {mask_generation_time:.1f}s")
+            logger.info(f"✓ Masks generated in {mask_generation_time:.1f}s\n")
             
             # Step 3: Generate patches from masks (masks_to_patches functionality)
-            logger.info("Step 2/2: Converting masks to training patches...")
+            logger.info("\nStep 2/2: Converting masks to training patches...")
             patch_start_time = time.time()
             
             # Setup split patches data directory
@@ -209,27 +209,27 @@ class RIEGLPreprocessor:
             test_mappings = img_mask_mappings[train_cut+val_cut:]
             # test_mappings = img_mask_mappings[train_cut+val_cut:]x
             
-            logger.info(f"Data split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}")
+            logger.info(f"\nData split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}\n")
             
             # Generate patches for each split
             logger.info("Generating training patches...")
             target_dir = os.path.join(split_data_path,'train')
             self.Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
             
-            logger.info("Generating validation patches...")
+            logger.info("\nGenerating validation patches...")
             target_dir = os.path.join(split_data_path,'val')
             self.Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
             
-            logger.info("Generating test patches...")
+            logger.info("\nGenerating test patches...")
             target_dir = os.path.join(split_data_path,'test')
             self.Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
             
             patch_generation_time = time.time() - patch_start_time
-            logger.info(f"✓ Patches generated in {patch_generation_time:.1f}s")
+            logger.info(f"\n✓ Patches generated in {patch_generation_time:.1f}s")
             
             # Calculate total time
             total_time = time.time() - start_time
-            logger.info(f"✓ Preprocessing completed in {total_time:.1f}s")
+            logger.info(f"\n✓ Preprocessing completed in {total_time:.1f}s\n")
             
         else:
             logger.warning("No image-annotation paths provided")
@@ -237,58 +237,58 @@ class RIEGLPreprocessor:
         
     def Save_image_patches_for_training(self, img_mappings, target_dir, color_code):
 
-        # ... (rest of your code)
-            #image_size = ConfigurationDict['image_size']
         base_patch_size = ConfigurationDict['base_patch_size']
-
-        # if ConfigurationDict['same_size_images'] == True:
-        #     no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
-        #     #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-        # def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-        #   # Perform the processing for a single tile
-        #   all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-        #   masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
-        #   classcode = get_mask_tile_class(masktile, color_code)
-        #   save_tiles(all_size_tiles, target_dir, classcode, counter)
-
         counter = np.int64(0)
         cs_temp = 0
         
         # Progress bar for patch generation - single bar for entire dataset
         subset_name = os.path.basename(target_dir)
-        # logger.info(f"Starting {subset_name} patch generation...")
         
-        # Calculate total number of patches to process
+        # Pre-load all images and calculate total patches (avoid double reading)
+        image_data_list = []
         total_patches = 0
-        for img_name_iter in range(len(img_mappings)):
-            img = cv2.imread(img_mappings[img_name_iter][0])
-            mask = cv2.imread(img_mappings[img_name_iter][1])
+        for img_path, mask_path in img_mappings:
+            img = cv2.imread(img_path)
+            mask = cv2.imread(mask_path)
+            if img is None or mask is None:
+                logger.warning(f"Skipping invalid image/mask pair: {img_path}")
+                continue
             image_size = img.shape[:2]
             no_of_rows, no_of_cols = self.get_no_rows_cols(image_size, base_patch_size)
-            total_patches += (no_of_rows - 1) * (no_of_cols - 1)
+            num_patches = (no_of_rows - 1) * (no_of_cols - 1)
+            total_patches += num_patches
+            image_data_list.append({
+                'img': img,
+                'mask': mask,
+                'image_size': image_size,
+                'no_of_rows': no_of_rows,
+                'no_of_cols': no_of_cols,
+                'num_patches': num_patches
+            })
+        
+        # Optimize ThreadPoolExecutor: limit workers for I/O-bound tasks
+        # For I/O-bound (file saving): use 2-4x CPU count, but cap at reasonable limit
+        max_workers = min(16, max(4, os.cpu_count() * 2))
         
         # Single progress bar for the entire dataset
         with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
-            for img_name_iter in range(len(img_mappings)):
-                # starttime = time.time() 
-                img = cv2.imread(img_mappings[img_name_iter][0])
-                #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
-                # print(img_mappings[img_name_iter][0])
-                # print(img_mappings[img_name_iter][1])
-                mask = cv2.imread(img_mappings[img_name_iter][1])
-                #print("Image number: ",cs_temp)
-                cs_temp+=1
-                # print(img.shape)
-                # print(mask.shape)
-                #if ConfigurationDict['same_size_images'] == False:
-                image_size = img.shape[:2]
-                no_of_rows , no_of_cols = self.get_no_rows_cols(image_size,base_patch_size)
-                #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-
-                padded_imgs_list  ,  padding_tuples_list = self.get_padded_imgs(img,image_size)
+            for img_data in image_data_list:
+                img_start_time = time.time()
+                img = img_data['img']
+                mask = img_data['mask']
+                image_size = img_data['image_size']
+                no_of_rows = img_data['no_of_rows']
+                no_of_cols = img_data['no_of_cols']
+                num_patches = img_data['num_patches']
                 
+                cs_temp += 1
+                
+                padded_imgs_list, padding_tuples_list = self.get_padded_imgs(img, image_size)
+                
+                # Time ThreadPoolExecutor execution
+                threadpool_start = time.time()
                 threads = []
-                with ThreadPoolExecutor() as executor:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     '''Iterating over rows and cols tiles'''
                     for col_index1 in range(no_of_cols-1):
                         for row_index1 in range(no_of_rows-1):
@@ -296,6 +296,8 @@ class RIEGLPreprocessor:
                             threads.append(thread)
                             counter += 1
 
+                # Time the completion/waiting phase
+                wait_start = time.time()
                 # Optionally wait for all tasks to complete and handle results/errors
                 for future in as_completed(threads):
                     try:
@@ -303,9 +305,15 @@ class RIEGLPreprocessor:
                         pbar.update(1)  # Update progress bar for each completed tile
                     except Exception as e:
                         logger.error(f"Patch processing error: {e}")
+                
+                wait_time = time.time() - wait_start
+                threadpool_time = time.time() - threadpool_start
+                img_total_time = time.time() - img_start_time
+                
+                # Log timing information per image (collective time only)
+                logger.info(f"Image {cs_temp}/{len(image_data_list)} total patch-generation time: {img_total_time:.2f}s")
         
-        logger.info(f"✓ {subset_name} patch generation completed")
-        #print("time: ",time.time()-starttime )
+        # logger.info(f"\n✓ {subset_name} patch generation completed\n")  # commented per request
 
     def get_no_rows_cols(self,img_shape,base_patch_size):
         img_h_col,img_w_row = img_shape[0],img_shape[1]
