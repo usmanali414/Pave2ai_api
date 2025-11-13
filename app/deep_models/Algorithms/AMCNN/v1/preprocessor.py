@@ -236,82 +236,78 @@ class RIEGLPreprocessor:
             return [], []
         
     def Save_image_patches_for_training(self, img_mappings, target_dir, color_code):
-
         base_patch_size = ConfigurationDict['base_patch_size']
-        counter = np.int64(0)
-        cs_temp = 0
-        
-        # Progress bar for patch generation - single bar for entire dataset
         subset_name = os.path.basename(target_dir)
         
-        # Pre-load all images and calculate total patches (avoid double reading)
-        image_data_list = []
-        total_patches = 0
-        for img_path, mask_path in img_mappings:
+        # Process each image and save as bundle
+        for img_idx, (img_path, mask_path) in enumerate(img_mappings):
+            img_start_time = time.time()
+            
+            # Load image and mask
             img = cv2.imread(img_path)
             mask = cv2.imread(mask_path)
             if img is None or mask is None:
                 logger.warning(f"Skipping invalid image/mask pair: {img_path}")
                 continue
+            
             image_size = img.shape[:2]
             no_of_rows, no_of_cols = self.get_no_rows_cols(image_size, base_patch_size)
             num_patches = (no_of_rows - 1) * (no_of_cols - 1)
-            total_patches += num_patches
-            image_data_list.append({
-                'img': img,
-                'mask': mask,
-                'image_size': image_size,
-                'no_of_rows': no_of_rows,
-                'no_of_cols': no_of_cols,
-                'num_patches': num_patches
-            })
-        
-        # Optimize ThreadPoolExecutor: limit workers for I/O-bound tasks
-        # For I/O-bound (file saving): use 2-4x CPU count, but cap at reasonable limit
-        max_workers = min(16, max(4, os.cpu_count() * 2))
-        
-        # Single progress bar for the entire dataset
-        with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
-            for img_data in image_data_list:
-                img_start_time = time.time()
-                img = img_data['img']
-                mask = img_data['mask']
-                image_size = img_data['image_size']
-                no_of_rows = img_data['no_of_rows']
-                no_of_cols = img_data['no_of_cols']
-                num_patches = img_data['num_patches']
+            
+            # Collect all patches for this image
+            padded_imgs_list, padding_tuples_list = self.get_padded_imgs(img, image_size)
+            all_tiles = []  # List of tiles arrays (each is 5 multiscale tiles)
+            all_labels = []
+            all_indices = []
+            
+            # Process all patches for this image using ThreadPoolExecutor
+            max_workers = min(16, max(4, os.cpu_count() * 2))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for col_index1 in range(no_of_cols - 1):
+                    for row_index1 in range(no_of_rows - 1):
+                        future = executor.submit(
+                            self.process_tile_for_bundle,
+                            row_index1, col_index1, padded_imgs_list, 
+                            padding_tuples_list, mask, color_code, base_patch_size
+                        )
+                        futures.append((future, row_index1, col_index1))
                 
-                cs_temp += 1
-                
-                padded_imgs_list, padding_tuples_list = self.get_padded_imgs(img, image_size)
-                
-                # Time ThreadPoolExecutor execution
-                threadpool_start = time.time()
-                threads = []
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    '''Iterating over rows and cols tiles'''
-                    for col_index1 in range(no_of_cols-1):
-                        for row_index1 in range(no_of_rows-1):
-                            thread = executor.submit(self.process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
-                            threads.append(thread)
-                            counter += 1
-
-                # Time the completion/waiting phase
-                wait_start = time.time()
-                # Optionally wait for all tasks to complete and handle results/errors
-                for future in as_completed(threads):
+                # Collect results
+                for future, row_index1, col_index1 in futures:
                     try:
-                        result = future.result()  # You could return something useful here
-                        pbar.update(1)  # Update progress bar for each completed tile
+                        tiles_list, classcode = future.result()
+                        if tiles_list is not None and classcode is not None:
+                            all_tiles.append(tiles_list)
+                            all_labels.append(int(classcode))
+                            all_indices.append([row_index1, col_index1])
                     except Exception as e:
-                        logger.error(f"Patch processing error: {e}")
+                        logger.error(f"Patch processing error at ({row_index1}, {col_index1}): {e}")
+            
+            # Save bundle for this image
+            if all_tiles:
+                # Get image stem for bundle filename
+                img_stem = os.path.splitext(os.path.basename(img_path))[0]
+                bundle_path = os.path.join(target_dir, f"{img_stem}.npz")
                 
-                wait_time = time.time() - wait_start
-                threadpool_time = time.time() - threadpool_start
+                # Convert to numpy arrays
+                # tiles: (N, K, H, W, C) where N=num_patches, K=5 (tile sizes), H=W=base_patch_size, C=3
+                tiles_array = np.array(all_tiles, dtype=np.uint8)  # Shape: (N, 5, 50, 50, 3)
+                labels_array = np.array(all_labels, dtype=np.uint8)  # Shape: (N,)
+                indices_array = np.array(all_indices, dtype=np.int32)  # Shape: (N, 2)
+                
+                # Save bundle with compression
+                np.savez_compressed(
+                    bundle_path,
+                    tiles=tiles_array,
+                    labels=labels_array,
+                    indices=indices_array,
+                    base_patch_size=base_patch_size,
+                    tile_sizes=ConfigurationDict['tile_sizes']
+                )
+                
                 img_total_time = time.time() - img_start_time
-                
-                # Log timing information per image (collective time only)
-                logger.info(f"Image {cs_temp}/{len(image_data_list)} total patch-generation time: {img_total_time:.2f}s")
+                logger.info(f"Image {img_idx+1}/{len(img_mappings)} ({img_stem}): {len(all_tiles)} patches saved in {img_total_time:.2f}s")
         
         # logger.info(f"\n✓ {subset_name} patch generation completed\n")  # commented per request
 
@@ -446,21 +442,47 @@ class RIEGLPreprocessor:
         np.savez(filename, alltiles=all_size_tiles)
 
     # ... (rest of your code)
-    def process_tile(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-        # Perform the processing for a single tile
-        all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-        masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+    # def process_tile(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+    #     # Perform the processing for a single tile
+    #     all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+    #     masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
         
-        # Extract the actual numpy array from the list structure
-        if isinstance(masktile_result, list) and len(masktile_result) > 0:
-            masktile = masktile_result[0]  # Get first row
-            if isinstance(masktile, list) and len(masktile) > 0:
-                masktile = masktile[0]  # Get first tile size
-        else:
-            masktile = masktile_result
+    #     # Extract the actual numpy array from the list structure
+    #     if isinstance(masktile_result, list) and len(masktile_result) > 0:
+    #         masktile = masktile_result[0]  # Get first row
+    #         if isinstance(masktile, list) and len(masktile) > 0:
+    #             masktile = masktile[0]  # Get first tile size
+    #     else:
+    #         masktile = masktile_result
         
-        classcode = self.get_mask_tile_class(masktile, color_code)
-        self.save_tiles(all_size_tiles, target_dir, classcode, counter)
+    #     classcode = self.get_mask_tile_class(masktile, color_code)
+    #     self.save_tiles(all_size_tiles, target_dir, classcode, counter)
+
+    def process_tile_for_bundle(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size):
+        """Process a single tile and return tiles + class code (for bundle format)."""
+        try:
+            # Get multiscale tiles
+            all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+            
+            # Get mask tile for class determination
+            masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+            
+            # Extract mask tile
+            if isinstance(masktile_result, list) and len(masktile_result) > 0:
+                masktile = masktile_result[0]
+                if isinstance(masktile, list) and len(masktile) > 0:
+                    masktile = masktile[0]
+            else:
+                masktile = masktile_result
+            
+            # Get class code
+            classcode = self.get_mask_tile_class(masktile, color_code)
+            
+            # Return tiles list and class code
+            return all_size_tiles, classcode
+        except Exception as e:
+            logger.error(f"Error processing tile ({row_index1}, {col_index1}): {e}")
+            return None, None
         
     def get_tile(self,row_index, col_index, base_patch_size, tile_size, padded_img, padding_tuple, padded_check=True):
         # Ensure row_index is 1-D array even if scalar
