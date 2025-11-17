@@ -1,7 +1,7 @@
 import os, re, cv2
 import numpy as np
 import math
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, CSVLogger #type: ignore
 
 def check_imgfile_validity(folder, file):
     """Function to check if the files in the given path are valid image files.
@@ -34,9 +34,68 @@ def check_dir_exists(folderPath, msg):
   if not os.path.exists(folderPath):
       raise Exception(f"Error:  {msg} does not exist.")
 
-def parse_images(imgpath):
-    data = np.load(imgpath)
-    return data['alltiles']
+# def parse_images(imgpath):
+#     data = np.load(imgpath)
+#     return data['alltiles']
+
+def parse_images(imgpath, patch_idx=None, bundle_cache=None):
+    """Parse images from bundle format or legacy individual .npz format.
+    
+    Args:
+        imgpath: Path to bundle file or legacy .npz file
+        patch_idx: Optional patch index for bundle format. If None, selects random patch.
+        bundle_cache: Optional dict to cache loaded bundles (key=bundle_path, value={'tiles': ..., 'labels': ...})
+    
+    Returns:
+        tuple: (tiles_array, label) where:
+            - tiles_array: numpy array of shape (5, H, W, C) with 5 multiscale tiles
+            - label: integer class label
+    """
+    # Check cache first for bundle format
+    if bundle_cache is not None and imgpath in bundle_cache:
+        cached_data = bundle_cache[imgpath]
+        tiles = cached_data['tiles']
+        labels = cached_data['labels']
+    else:
+        # Load from disk
+        data = np.load(imgpath, allow_pickle=True)
+        
+        # Check if it's a bundle (has 'tiles' key) or legacy format (has 'alltiles' key)
+        if 'tiles' in data:
+            tiles = data['tiles']
+            labels = data['labels']
+            # Cache it if cache dict provided
+            if bundle_cache is not None:
+                bundle_cache[imgpath] = {
+                    'tiles': tiles,
+                    'labels': labels
+                }
+        else:
+            # Legacy format: individual .npz file
+            alltiles = data['alltiles']
+            path_parts = imgpath.split(os.sep)
+            label = 0
+            for part in path_parts:
+                if part in ['0', '1', '2', '3', '4']:
+                    label = int(part)
+                    break
+            return alltiles, label
+    
+    # Handle bundle format
+    n_patches = len(tiles)
+    if n_patches == 0:
+        raise ValueError(f"Bundle {imgpath} has no patches")
+    
+    # Use provided patch_idx or select random
+    if patch_idx is None:
+        patch_idx = np.random.randint(0, n_patches)
+    elif patch_idx >= n_patches:
+        patch_idx = patch_idx % n_patches  # Wrap around if out of bounds
+    
+    selected_tiles = tiles[patch_idx]  # Shape: (K, H, W, C) = (5, 50, 50, 3)
+    selected_label = int(labels[patch_idx])
+    
+    return selected_tiles, selected_label
 
 
 def create_class_weight(labels_dict,mu=0.15):

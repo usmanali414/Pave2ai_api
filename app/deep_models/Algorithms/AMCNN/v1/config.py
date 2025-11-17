@@ -35,3 +35,70 @@ class AMCNN_V1_CONFIG():
     dataName = 'new_drmp'
     datatype='new'
     visible_device = "1"
+    dataset_config = {
+        "base_path": "static/AMCNN/v1",
+        "images_dir": "orig_images",
+        "jsons_dir": "jsons",
+        "masks_dir": "masks",
+        "patches_dir": "split_patches_data",
+        "inference_base_dir": "inference",
+        "inference_masks_dir": "masks",
+        "inference_overlays_dir": "overlays"
+    }
+    
+    # Dynamic static root (set by orchestrator); all AMCNN paths derive from this
+    _STATIC_ROOT = None  # e.g., Path('E:/Pave2ai_api/static')
+
+    @classmethod
+    def set_static_root(cls, root_path):
+        from pathlib import Path
+        cls._STATIC_ROOT = Path(root_path)
+
+    @classmethod
+    def _default_static_root(cls):
+        from pathlib import Path
+        here = Path(__file__).resolve()
+        # app/deep_models/Algorithms/AMCNN/v1/config.py → repo_root is parents[5]
+        repo_root = here.parents[5] if len(here.parents) >= 6 else here.parents[-1]
+        return repo_root / "static"
+
+    @classmethod
+    def get_static_root(cls):
+        return cls._STATIC_ROOT or cls._default_static_root()
+
+    @classmethod
+    def get_model_root(cls):
+        from pathlib import Path
+        return cls.get_static_root() / Path("AMCNN") / "v1"
+
+    @classmethod
+    def get_dataset_root(cls):
+        return cls.get_model_root() / "dataset"
+
+    @classmethod
+    def get_images_dir(cls):
+        return cls.get_dataset_root() / cls.dataset_config["images_dir"]
+
+    @classmethod
+    def get_jsons_dir(cls):
+        return cls.get_dataset_root() / cls.dataset_config["jsons_dir"]
+
+    @classmethod
+    def get_masks_dir(cls):
+        return cls.get_dataset_root() / cls.dataset_config["masks_dir"]
+
+    @classmethod
+    def get_patches_dir(cls):
+        return cls.get_model_root() / cls.dataset_config["patches_dir"]
+
+    @classmethod
+    def get_inference_base_dir(cls):
+        return cls.get_model_root() / cls.dataset_config["inference_base_dir"]
+
+    @classmethod
+    def get_inference_masks_dir(cls):
+        return cls.get_inference_base_dir() / cls.dataset_config["inference_masks_dir"]
+
+    @classmethod
+    def get_inference_overlays_dir(cls):
+        return cls.get_inference_base_dir() / cls.dataset_config["inference_overlays_dir"]

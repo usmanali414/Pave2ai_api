@@ -2,6 +2,7 @@ import os
 import glob
 import cv2
 import numpy as np
+from tqdm import tqdm
 from pathlib import Path
 from typing import Optional, Tuple, Dict
 from app.utils.logger_utils import logger
@@ -82,20 +83,20 @@ def infer_image(img: np.ndarray, model, preprocessor: RIEGLPreprocessor, configs
             if isinstance(curr_tiles, list) and curr_tiles and isinstance(curr_tiles[0], list):
                 curr_tiles = curr_tiles[0]
 
-            if not curr_tiles:
-                logger.info(f"inference: skip empty tiles r={row_index1} c={col_index1}")
-                continue
-            if len(curr_tiles) < 5:
-                logger.info(f"inference: skip <5 tiles r={row_index1} c={col_index1} n={len(curr_tiles)}")
-                continue
-            # Validate tile shapes/dtypes once in a while
-            t0 = curr_tiles[0]
-            if not isinstance(t0, np.ndarray):
-                logger.info(f"inference: non-ndarray tile r={row_index1} c={col_index1} type={type(t0)}")
-                continue
-            if t0.ndim != 3:
-                logger.info(f"inference: bad tile ndim={t0.ndim} shape={t0.shape} r={row_index1} c={col_index1}")
-                continue
+            # if not curr_tiles:
+            #     logger.info(f"inference: skip empty tiles r={row_index1} c={col_index1}")
+            #     continue
+            # if len(curr_tiles) < 5:
+            #     logger.info(f"inference: skip <5 tiles r={row_index1} c={col_index1} n={len(curr_tiles)}")
+            #     continue
+            # # Validate tile shapes/dtypes once in a while
+            # t0 = curr_tiles[0]
+            # if not isinstance(t0, np.ndarray):
+            #     logger.info(f"inference: non-ndarray tile r={row_index1} c={col_index1} type={type(t0)}")
+            #     continue
+            # if t0.ndim != 3:
+            #     logger.info(f"inference: bad tile ndim={t0.ndim} shape={t0.shape} r={row_index1} c={col_index1}")
+            #     continue
 
             # Model expects (1,H,W,3), tiles are already resized in preprocessor
             tile_0 = np.expand_dims(curr_tiles[0], axis=0)
@@ -104,11 +105,11 @@ def infer_image(img: np.ndarray, model, preprocessor: RIEGLPreprocessor, configs
             tile_3 = np.expand_dims(curr_tiles[3], axis=0)
             tile_4 = np.expand_dims(curr_tiles[4], axis=0)
 
-            result = model.predict([tile_0, tile_1, tile_2, tile_3, tile_4])
+            result = model.predict([tile_0, tile_1, tile_2, tile_3, tile_4], verbose=0)
             pred = int(np.argmax(result, -1)[0])
             pred_calls += 1
-            if pred_calls <= 10:
-                logger.info(f"inference: pred r={row_index1} c={col_index1} class={pred}")
+            # if pred_calls <= 10:
+            #     logger.info(f"inference: pred r={row_index1} c={col_index1} class={pred}")
 
             start_y, end_y = (col_index1 * base_patch_size), (col_index1 * base_patch_size) + base_patch_size
             start_x, end_x = (row_index1 * base_patch_size), (row_index1 * base_patch_size) + base_patch_size
@@ -161,6 +162,53 @@ def infer_image(img: np.ndarray, model, preprocessor: RIEGLPreprocessor, configs
 #     return {"mask_path": mask_path, "overlay_path": overlay_path}
 
 
+# def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = True, weights_local_path: Optional[str] = None) -> Dict[str, list]:
+#     """
+#     Runs inference for all images in a folder. If images_dir is None, uses dynamic path:
+#       static/orig_images from RIEGL_PARSER_CONFIG.
+#     """
+#     if images_dir is None:
+#         images_dir = _get_images_dir()
+
+#     if not os.path.isdir(images_dir):
+#         raise NotADirectoryError(f"Images directory not found: {images_dir}")
+
+#     # Preload components once for all images (allowing weights override)
+#     model, preprocessor, configs = _load_inference_components(weights_local_path)
+#     masks_dir, overlays_dir = _get_output_dirs()
+
+#     results = []
+#     image_files = sorted(glob.glob(os.path.join(images_dir, "*.*")))
+#     for img_path in image_files:
+#         img = cv2.imread(img_path)
+#         if img is None:
+#             continue
+#         img_norm = img / 255.0
+
+#         mask = infer_image(img_norm, model, preprocessor, configs)
+#         mask_cropped = mask[:img.shape[0], :img.shape[1], :].astype('uint8')
+
+#         base_name = os.path.splitext(os.path.basename(img_path))[0]
+#         mask_path = os.path.join(masks_dir, f"{base_name}.png")
+#         cv2.imwrite(mask_path, mask_cropped)
+
+#         overlay_path = ""
+#         if save_overlay:
+#             overlay_path = os.path.join(overlays_dir, f"{base_name}_overlay.png")
+#             overlay = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2RGB)
+#             import matplotlib.pyplot as plt
+#             plt.figure(figsize=(10, 5))
+#             plt.axis('off')
+#             plt.imshow(overlay)
+#             plt.imshow(mask_cropped, alpha=0.4)
+#             plt.tight_layout()
+#             plt.savefig(overlay_path, dpi=300, bbox_inches='tight', pad_inches=0)
+#             plt.close()
+
+#         results.append({"image": img_path, "mask_path": mask_path, "overlay_path": overlay_path})
+
+#     return {"results": results, "masks_dir": masks_dir, "overlays_dir": overlays_dir}
+
 def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = True, weights_local_path: Optional[str] = None) -> Dict[str, list]:
     """
     Runs inference for all images in a folder. If images_dir is None, uses dynamic path:
@@ -178,7 +226,12 @@ def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = 
 
     results = []
     image_files = sorted(glob.glob(os.path.join(images_dir, "*.*")))
-    for img_path in image_files:
+    total_images = len(image_files)
+    
+    logger.info(f"inference: processing {total_images} images")
+    
+    # Use tqdm for progress bar
+    for img_path in tqdm(image_files, desc="Inference progress", unit="image"):
         img = cv2.imread(img_path)
         if img is None:
             continue
@@ -195,6 +248,8 @@ def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = 
         if save_overlay:
             overlay_path = os.path.join(overlays_dir, f"{base_name}_overlay.png")
             overlay = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2RGB)
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-GUI backend to avoid Tkinter errors
             import matplotlib.pyplot as plt
             plt.figure(figsize=(10, 5))
             plt.axis('off')
@@ -205,5 +260,7 @@ def run_folder_inference(images_dir: Optional[str] = None, save_overlay: bool = 
             plt.close()
 
         results.append({"image": img_path, "mask_path": mask_path, "overlay_path": overlay_path})
+    
+    logger.info(f"inference: completed {total_images} images")
 
     return {"results": results, "masks_dir": masks_dir, "overlays_dir": overlays_dir}

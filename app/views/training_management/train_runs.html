@@ -432,7 +432,13 @@
     actions.className = 'run-actions';
     
     if (run.status === 'completed'){
-      actions.innerHTML = '<button class="btn btn-view" disabled>✓ Completed</button>';
+      var btnContainer = document.createElement('div');
+      btnContainer.style.display = 'flex';
+      btnContainer.style.gap = '8px';
+      btnContainer.innerHTML = 
+        '<button class="btn btn-view" onclick="startInference(\'' + (run._id || run.train_run_id) + '\')" style="background: #8b5cf6; border-color: #8b5cf6; color: #fff;">🔮 Start Inference</button>' +
+        '<button class="btn" disabled>✓ Completed</button>';
+      actions.appendChild(btnContainer);
     } else if (run.status === 'failed'){
       // Determine resume step from step_status
       var resumeStep = 'failed step';
@@ -504,6 +510,37 @@
       .catch(function(e){
         console.error('Resume failed:', e);
         showToast(e.message || 'Failed to resume', 'error');
+      });
+  };
+
+  // Start inference
+  window.startInference = function(runId){
+    console.log('Attempting to start inference for runId:', runId);
+    if (!confirm('Start inference for this completed training run?')) return;
+    
+    showToast('Starting inference...', 'success');
+    
+    var url = '/infer?train_run_id=' + encodeURIComponent(runId);
+    console.log('Inference URL:', url);
+    
+    fetch(url, { method: 'POST' })
+      .then(function(r){
+        console.log('Inference response status:', r.status);
+        if (!r.ok){
+          return r.json().then(function(j){
+            throw new Error(j.detail || 'Failed to start inference');
+          });
+        }
+        return r.json();
+      })
+      .then(function(data){
+        console.log('Inference response data:', data);
+        if (!data) return;
+        showToast('Inference started successfully!', 'success');
+      })
+      .catch(function(e){
+        console.error('Inference failed:', e);
+        showToast(e.message || 'Failed to start inference', 'error');
       });
   };
 
@@ -641,32 +678,45 @@
   //     });
   // }
 
-  // Auto-refresh for in-progress runs
-  function autoRefresh(){
+  // Auto-refresh for in-progress runs (debounced, backoff, tab-aware)
+  var refreshTimerId = null;
+  var ACTIVE_REFRESH_MS = 30000; // 30s to reduce UI churn
+  
+  function scheduleAutoRefresh(){
+    if (refreshTimerId) {
+      clearTimeout(refreshTimerId);
+      refreshTimerId = null;
+    }
+    // Only refresh when tab is visible to the user
+    if (document.hidden) return;
     var hasInProgress = currentRuns.some(function(r){ 
       return r.status === 'training' || r.status === 'resuming'; 
     });
-    if (hasInProgress){
-      setTimeout(function(){ 
-        loadTrainRuns(); 
-        // Update progress for in-progress runs
-        currentRuns.forEach(function(run) {
-          if (run.status === 'training' || run.status === 'resuming') {
-            updateProgressIndicators(run._id || run.train_run_id);
-          }
-        });
-      }, 10000); // Refresh every 10 seconds
-    }
+    if (!hasInProgress) return; // don't keep reloading when idle
+    refreshTimerId = setTimeout(function(){
+      loadTrainRuns();
+      // Chain next refresh after this one completes
+      scheduleAutoRefresh();
+    }, ACTIVE_REFRESH_MS);
   }
+  
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) {
+      // When user returns to tab, refresh once and reschedule
+      loadTrainRuns();
+      scheduleAutoRefresh();
+    } else if (refreshTimerId) {
+      clearTimeout(refreshTimerId);
+      refreshTimerId = null;
+    }
+  });
   
   // Initial load
   loadProjects();
   loadTrainRuns();
   
-  // Set up auto-refresh
-  setInterval(function(){
-    autoRefresh();
-  }, 10000);
+  // Set up auto-refresh (single debounced loop)
+  scheduleAutoRefresh();
 })();
 </script>
 {% endblock %}

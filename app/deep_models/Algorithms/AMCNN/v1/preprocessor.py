@@ -172,14 +172,14 @@ class RIEGLPreprocessor:
             start_time = time.time()
             
             # Step 2: Generate masks using the mask generator
-            logger.info("Step 1/2: Generating masks from annotations...")
+            logger.info("\nStep 1/2: Generating masks from annotations...")
             self.mask_generator.create_masks(json_folder_path, outputpath, orig_imgs_path)
             
             mask_generation_time = time.time() - start_time
-            logger.info(f"✓ Masks generated in {mask_generation_time:.1f}s")
+            logger.info(f"✓ Masks generated in {mask_generation_time:.1f}s\n")
             
             # Step 3: Generate patches from masks (masks_to_patches functionality)
-            logger.info("Step 2/2: Converting masks to training patches...")
+            logger.info("\nStep 2/2: Converting masks to training patches...")
             patch_start_time = time.time()
             
             # Setup split patches data directory
@@ -209,103 +209,107 @@ class RIEGLPreprocessor:
             test_mappings = img_mask_mappings[train_cut+val_cut:]
             # test_mappings = img_mask_mappings[train_cut+val_cut:]x
             
-            logger.info(f"Data split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}")
+            logger.info(f"\nData split - Train: {len(train_mappings)}, Val: {len(val_mappings)}, Test: {len(test_mappings)}\n")
             
             # Generate patches for each split
             logger.info("Generating training patches...")
             target_dir = os.path.join(split_data_path,'train')
             self.Save_image_patches_for_training(train_mappings, target_dir, self.color_code)
             
-            logger.info("Generating validation patches...")
+            logger.info("\nGenerating validation patches...")
             target_dir = os.path.join(split_data_path,'val')
             self.Save_image_patches_for_training(val_mappings, target_dir, self.color_code)
             
-            logger.info("Generating test patches...")
+            logger.info("\nGenerating test patches...")
             target_dir = os.path.join(split_data_path,'test')
             self.Save_image_patches_for_training(test_mappings, target_dir, self.color_code)
             
             patch_generation_time = time.time() - patch_start_time
-            logger.info(f"✓ Patches generated in {patch_generation_time:.1f}s")
+            logger.info(f"\n✓ Patches generated in {patch_generation_time:.1f}s")
             
             # Calculate total time
             total_time = time.time() - start_time
-            logger.info(f"✓ Preprocessing completed in {total_time:.1f}s")
+            logger.info(f"\n✓ Preprocessing completed in {total_time:.1f}s\n")
             
         else:
             logger.warning("No image-annotation paths provided")
             return [], []
         
     def Save_image_patches_for_training(self, img_mappings, target_dir, color_code):
-
-        # ... (rest of your code)
-            #image_size = ConfigurationDict['image_size']
         base_patch_size = ConfigurationDict['base_patch_size']
-
-        # if ConfigurationDict['same_size_images'] == True:
-        #     no_of_rows , no_of_cols = get_no_rows_cols(image_size,base_patch_size)
-        #     #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-        # def process_tile(row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-        #   # Perform the processing for a single tile
-        #   all_size_tiles = get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-        #   masktile = get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
-        #   classcode = get_mask_tile_class(masktile, color_code)
-        #   save_tiles(all_size_tiles, target_dir, classcode, counter)
-
-        counter = np.int64(0)
-        cs_temp = 0
-        
-        # Progress bar for patch generation - single bar for entire dataset
         subset_name = os.path.basename(target_dir)
-        # logger.info(f"Starting {subset_name} patch generation...")
         
-        # Calculate total number of patches to process
-        total_patches = 0
-        for img_name_iter in range(len(img_mappings)):
-            img = cv2.imread(img_mappings[img_name_iter][0])
-            mask = cv2.imread(img_mappings[img_name_iter][1])
+        # Process each image and save as bundle
+        for img_idx, (img_path, mask_path) in enumerate(img_mappings):
+            img_start_time = time.time()
+            
+            # Load image and mask
+            img = cv2.imread(img_path)
+            mask = cv2.imread(mask_path)
+            if img is None or mask is None:
+                logger.warning(f"Skipping invalid image/mask pair: {img_path}")
+                continue
+            
             image_size = img.shape[:2]
             no_of_rows, no_of_cols = self.get_no_rows_cols(image_size, base_patch_size)
-            total_patches += (no_of_rows - 1) * (no_of_cols - 1)
-        
-        # Single progress bar for the entire dataset
-        with tq(total=total_patches, desc=f"Generating {subset_name} patches", position=0, leave=True, ncols=80) as pbar:
-            for img_name_iter in range(len(img_mappings)):
-                # starttime = time.time() 
-                img = cv2.imread(img_mappings[img_name_iter][0])
-                #img = cv2.cvtColor(img,cv2.Color_BGR2RGB)
-                # print(img_mappings[img_name_iter][0])
-                # print(img_mappings[img_name_iter][1])
-                mask = cv2.imread(img_mappings[img_name_iter][1])
-                #print("Image number: ",cs_temp)
-                cs_temp+=1
-                # print(img.shape)
-                # print(mask.shape)
-                #if ConfigurationDict['same_size_images'] == False:
-                image_size = img.shape[:2]
-                no_of_rows , no_of_cols = self.get_no_rows_cols(image_size,base_patch_size)
-                #top,bottom,left,right = get_padding_dims(base_patch_size,tile_size,image_size )
-
-                padded_imgs_list  ,  padding_tuples_list = self.get_padded_imgs(img,image_size)
+            num_patches = (no_of_rows - 1) * (no_of_cols - 1)
+            
+            # Collect all patches for this image
+            padded_imgs_list, padding_tuples_list = self.get_padded_imgs(img, image_size)
+            all_tiles = []  # List of tiles arrays (each is 5 multiscale tiles)
+            all_labels = []
+            all_indices = []
+            
+            # Process all patches for this image using ThreadPoolExecutor
+            max_workers = min(16, max(4, os.cpu_count() * 2))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for col_index1 in range(no_of_cols - 1):
+                    for row_index1 in range(no_of_rows - 1):
+                        future = executor.submit(
+                            self.process_tile_for_bundle,
+                            row_index1, col_index1, padded_imgs_list, 
+                            padding_tuples_list, mask, color_code, base_patch_size
+                        )
+                        futures.append((future, row_index1, col_index1))
                 
-                threads = []
-                with ThreadPoolExecutor() as executor:
-                    '''Iterating over rows and cols tiles'''
-                    for col_index1 in range(no_of_cols-1):
-                        for row_index1 in range(no_of_rows-1):
-                            thread = executor.submit(self.process_tile, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir)
-                            threads.append(thread)
-                            counter += 1
-
-                # Optionally wait for all tasks to complete and handle results/errors
-                for future in as_completed(threads):
+                # Collect results
+                for future, row_index1, col_index1 in futures:
                     try:
-                        result = future.result()  # You could return something useful here
-                        pbar.update(1)  # Update progress bar for each completed tile
+                        tiles_list, classcode = future.result()
+                        if tiles_list is not None and classcode is not None:
+                            all_tiles.append(tiles_list)
+                            all_labels.append(int(classcode))
+                            all_indices.append([row_index1, col_index1])
                     except Exception as e:
-                        logger.error(f"Patch processing error: {e}")
+                        logger.error(f"Patch processing error at ({row_index1}, {col_index1}): {e}")
+            
+            # Save bundle for this image
+            if all_tiles:
+                # Get image stem for bundle filename
+                img_stem = os.path.splitext(os.path.basename(img_path))[0]
+                bundle_path = os.path.join(target_dir, f"{img_stem}.npz")
+                
+                # Convert to numpy arrays
+                # tiles: (N, K, H, W, C) where N=num_patches, K=5 (tile sizes), H=W=base_patch_size, C=3
+                tiles_array = np.array(all_tiles, dtype=np.uint8)  # Shape: (N, 5, 50, 50, 3)
+                labels_array = np.array(all_labels, dtype=np.uint8)  # Shape: (N,)
+                indices_array = np.array(all_indices, dtype=np.int32)  # Shape: (N, 2)
+                
+                # Save bundle with compression
+                np.savez_compressed(
+                    bundle_path,
+                    tiles=tiles_array,
+                    labels=labels_array,
+                    indices=indices_array,
+                    base_patch_size=base_patch_size,
+                    tile_sizes=ConfigurationDict['tile_sizes']
+                )
+                
+                img_total_time = time.time() - img_start_time
+                logger.info(f"Image {img_idx+1}/{len(img_mappings)} ({img_stem}): {len(all_tiles)} patches saved in {img_total_time:.2f}s")
         
-        logger.info(f"✓ {subset_name} patch generation completed")
-        #print("time: ",time.time()-starttime )
+        # logger.info(f"\n✓ {subset_name} patch generation completed\n")  # commented per request
 
     def get_no_rows_cols(self,img_shape,base_patch_size):
         img_h_col,img_w_row = img_shape[0],img_shape[1]
@@ -438,21 +442,47 @@ class RIEGLPreprocessor:
         np.savez(filename, alltiles=all_size_tiles)
 
     # ... (rest of your code)
-    def process_tile(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
-        # Perform the processing for a single tile
-        all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
-        masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+    # def process_tile(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size, counter, target_dir):
+    #     # Perform the processing for a single tile
+    #     all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+    #     masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
         
-        # Extract the actual numpy array from the list structure
-        if isinstance(masktile_result, list) and len(masktile_result) > 0:
-            masktile = masktile_result[0]  # Get first row
-            if isinstance(masktile, list) and len(masktile) > 0:
-                masktile = masktile[0]  # Get first tile size
-        else:
-            masktile = masktile_result
+    #     # Extract the actual numpy array from the list structure
+    #     if isinstance(masktile_result, list) and len(masktile_result) > 0:
+    #         masktile = masktile_result[0]  # Get first row
+    #         if isinstance(masktile, list) and len(masktile) > 0:
+    #             masktile = masktile[0]  # Get first tile size
+    #     else:
+    #         masktile = masktile_result
         
-        classcode = self.get_mask_tile_class(masktile, color_code)
-        self.save_tiles(all_size_tiles, target_dir, classcode, counter)
+    #     classcode = self.get_mask_tile_class(masktile, color_code)
+    #     self.save_tiles(all_size_tiles, target_dir, classcode, counter)
+
+    def process_tile_for_bundle(self, row_index1, col_index1, padded_imgs_list, padding_tuples_list, mask, color_code, base_patch_size):
+        """Process a single tile and return tiles + class code (for bundle format)."""
+        try:
+            # Get multiscale tiles
+            all_size_tiles = self.get_tiles_of_all_sizes(row_index1, col_index1, padded_imgs_list, padding_tuples_list)
+            
+            # Get mask tile for class determination
+            masktile_result = self.get_tile(row_index1, col_index1, base_patch_size, base_patch_size, mask, padding_tuple=None, padded_check=False)
+            
+            # Extract mask tile
+            if isinstance(masktile_result, list) and len(masktile_result) > 0:
+                masktile = masktile_result[0]
+                if isinstance(masktile, list) and len(masktile) > 0:
+                    masktile = masktile[0]
+            else:
+                masktile = masktile_result
+            
+            # Get class code
+            classcode = self.get_mask_tile_class(masktile, color_code)
+            
+            # Return tiles list and class code
+            return all_size_tiles, classcode
+        except Exception as e:
+            logger.error(f"Error processing tile ({row_index1}, {col_index1}): {e}")
+            return None, None
         
     def get_tile(self,row_index, col_index, base_patch_size, tile_size, padded_img, padding_tuple, padded_check=True):
         # Ensure row_index is 1-D array even if scalar

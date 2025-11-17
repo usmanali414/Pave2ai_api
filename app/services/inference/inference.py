@@ -7,6 +7,8 @@ from app.database.conn import mongo_client
 from config import database_config
 from app.services.s3.s3_operations import S3Operations
 from app.utils.logger_utils import logger
+from pathlib import Path
+from app.deep_models.Algorithms.DETECTRON2.v1.config import get_output_dir
 
 def normalize_component_name(name: str) -> str:
     if not name:
@@ -49,32 +51,32 @@ async def load_bucket_config(project_id: str) -> dict:
     except Exception as e:
         raise Exception(str(e))
 
-async def trigger_inference(train_run_id: str, train_config_id: str):
+async def trigger_inference(train_run_id: str):
     """
     Non-blocking: spawns background task and returns immediately.
     """
-    if not train_run_id or not isinstance(train_run_id, str) or not train_config_id or not isinstance(train_config_id, str):
-        raise Exception("train_run_id and train_config_id are required and must be a string")
+    if not train_run_id or not isinstance(train_run_id, str):
+        raise Exception("train_run_id is required and must be a string")
 
     # Fire-and-forget background job
     logger.info(f"inference: schedule run_id={train_run_id}")
-    asyncio.create_task(_run_inference_background(train_run_id, train_config_id))
+    asyncio.create_task(_run_inference_background(train_run_id))
 
     return {
         "status": "started",
         "train_run_id": train_run_id,
-        "train_config_id": train_config_id,
         "message": "Inference started in background"
     }
 
-async def _run_inference_background(train_run_id: str, train_config_id: str):
+async def _run_inference_background(train_run_id: str):
     """
     Background pipeline:
-      1) Load config/run/bucket config
-      2) Download trained weights (output_weights_s3_url) → local temp
-      3) Upload same weights → folder_structure['inference_input_model']
-      4) Run model folder inference with local weights (non-blocking via to_thread)
-      5) Upload:
+      1) Load train_run from DB (contains train_config_id)
+      2) Load config/run/bucket config
+      3) Download trained weights (output_weights_s3_url) → local temp
+      4) Upload same weights → folder_structure['inference_input_model']
+      5) Run model folder inference with local weights (non-blocking via to_thread)
+      6) Upload:
          - weights → folder_structure['inference_output_labels']
          - masks → folder_structure['inference_output_metadata']/masks/<original>.png
          - labelized_images → .../labelized_images/<original>.png
@@ -86,6 +88,12 @@ async def _run_inference_background(train_run_id: str, train_config_id: str):
         # Load DB docs
         logger.info(f"inference: start run_id={train_run_id}")
         train_run = await get_training_run(train_run_id)
+        
+        # Extract train_config_id from train_run document
+        train_config_id = train_run.get("train_config_id")
+        if not train_config_id:
+            raise Exception("train_config_id not found in train_run document")
+        
         train_config = await get_train_config(train_config_id)
         bucket_config = await load_bucket_config(train_config.get("project_id"))
         folder_structure = (bucket_config.get("folder_structure") or {})
@@ -126,7 +134,89 @@ async def _run_inference_background(train_run_id: str, train_config_id: str):
         #    This writes local masks/overlays into static/amcnn_inference/...
         #    Returns: {"results":[{"image", "mask_path", "overlay_path"}, ...], "masks_dir", "overlays_dir"}
         logger.info("inference: folder inference begin")
-        inf_result = await asyncio.to_thread(run_folder_inference, None, True, local_weights_path)
+        # inf_result = await asyncio.to_thread(run_folder_inference, None, True, local_weights_path)
+        def _run_any_inference(inference_module, local_weights_path, model_name_str, images_dir=None, out_dir="viz_instances"):
+            # For Detectron2: use run_inference directly (it now accepts absolute paths)
+            if model_name_str.upper() == "DETECTRON2" and hasattr(inference_module, "run_inference"):
+                from pathlib import Path
+                from app.deep_models.Algorithms.DETECTRON2.v1.config import get_output_dir
+                
+                # Pass absolute path directly - Detectron2's run_inference now handles it
+                result_list = inference_module.run_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    images_dir=images_dir,
+                    out_dir=out_dir,
+                )
+                
+                # Transform Detectron2 results to match expected format
+                # Detectron2 saves visualizations as {image_stem}_pred.png in out_dir
+                det2_out_dir = Path(get_output_dir()) / out_dir
+                transformed_results = []
+                
+                if isinstance(result_list, list):
+                    for pred_dict in result_list:
+                        # Detectron2 returns dicts with "file_name" key
+                        file_name = pred_dict.get("file_name", "")
+                        if not file_name:
+                            continue
+                        
+                        # Build paths
+                        image_path = str(Path(images_dir) / file_name) if images_dir else None
+                        overlay_path = str(det2_out_dir / f"{Path(file_name).stem}_pred.png")
+                        
+                        # Detectron2 doesn't generate separate masks, use overlay as both
+                        mask_path = overlay_path  # Same as overlay for Detectron2
+                        
+                        transformed_results.append({
+                            "image": image_path,
+                            "mask_path": mask_path if Path(overlay_path).exists() else None,
+                            "overlay_path": overlay_path if Path(overlay_path).exists() else None
+                        })
+                
+                return {
+                    "results": transformed_results
+                }
+            # For AMCNN: use run_folder_inference with correct signature
+            if model_name_str.upper() == "AMCNN" and hasattr(inference_module, "run_folder_inference"):
+                return inference_module.run_folder_inference(
+                    images_dir=images_dir,
+                    save_overlay=True,
+                    weights_local_path=str(local_weights_path),  # absolute path
+                )
+            # For other models: use run_inference if available
+            if hasattr(inference_module, "run_inference"):
+                return inference_module.run_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    images_dir=images_dir,
+                    out_dir=out_dir,
+                )
+            # Fallback to run_folder_inference for other models
+            if hasattr(inference_module, "run_folder_inference"):
+                return inference_module.run_folder_inference(
+                    weights=str(local_weights_path),  # absolute path
+                    out_dir=out_dir,
+                )
+            # Last resort generic 'infer(weights_path)'
+            if hasattr(inference_module, "infer"):
+                return inference_module.infer(str(local_weights_path))
+            raise RuntimeError("No supported inference entry found in module")
+
+        # Resolve images_dir from model config when available
+        images_dir = None
+        try:
+            if model_name.upper() == "DETECTRON2":
+                from app.deep_models.Algorithms.DETECTRON2.v1.config import get_images_dir as d2_get_images_dir
+                images_dir = str(d2_get_images_dir())
+            elif model_name.upper() == "AMCNN":
+                from app.deep_models.Algorithms.AMCNN.v1.config import AMCNN_V1_CONFIG
+                images_dir = str(AMCNN_V1_CONFIG.get_images_dir())
+        except Exception:
+            images_dir = None
+
+        # Use the adapter (works for current and future models)
+        inf_result = await asyncio.to_thread(
+            _run_any_inference, inference_module, local_weights_path, model_name, images_dir, "viz_instances"
+        )
         logger.info("inference: folder inference done")
 
         # 4) Upload final weights snapshot to inference_output_labels
@@ -140,6 +230,30 @@ async def _run_inference_background(train_run_id: str, train_config_id: str):
         results = inf_result.get("results", []) if isinstance(inf_result, dict) else []
         uploaded_masks = 0
         uploaded_overlays = 0
+
+        # Upload DETECTRON2 files once (outside loop)
+        if model_name.upper() == "DETECTRON2":
+            try:
+                det2_out_dir = Path(get_output_dir()) / "viz_instances"
+                s3_base = f"{inference_output_metadata.rstrip('/')}/{train_run_id}"
+
+                # Upload predictions.json once
+                predictions_json_path = det2_out_dir / "predictions.json"
+                if predictions_json_path.exists():
+                    await asyncio.to_thread(s3.upload_file, str(predictions_json_path), f"{s3_base}/predictions.json")
+                    logger.info("inference: uploaded predictions.json")
+
+                # Upload all PNG overlays once
+                png_count = 0
+                for png_path in det2_out_dir.glob("*.png"):
+                    await asyncio.to_thread(s3.upload_file, str(png_path), f"{s3_base}/{png_path.name}")
+                    png_count += 1
+                if png_count > 0:
+                    logger.info(f"inference: uploaded {png_count} DETECTRON2 PNG overlays to predictions dir")
+            except Exception as e:
+                logger.error(f"inference: failed to upload DETECTRON2 files: {e}")
+
+        # Process AMCNN results (per-item loop)
         for item in results:
             img_path = item.get("image")
             mask_path = item.get("mask_path")
@@ -149,20 +263,24 @@ async def _run_inference_background(train_run_id: str, train_config_id: str):
                 continue
             base = os.path.splitext(os.path.basename(img_path))[0]
 
-            # {run_id}/masks/<original>.png
-            if mask_path and os.path.exists(mask_path):
-                s3_mask = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/masks/{base}.png"
-                await asyncio.to_thread(s3.upload_file, mask_path, s3_mask)
-                uploaded_masks += 1
+            if model_name.upper() == "AMCNN":
+                try:
+                    if mask_path and os.path.exists(mask_path):
+                        s3_mask = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/masks/{base}.png"
+                        await asyncio.to_thread(s3.upload_file, mask_path, s3_mask)
+                        uploaded_masks += 1
 
-            # {run_id}/labelized_images/<original>.png
-            if overlay_path and os.path.exists(overlay_path):
-                s3_overlay = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/labelized_images/{base}.png"
-                await asyncio.to_thread(s3.upload_file, overlay_path, s3_overlay)
-                uploaded_overlays += 1
-        logger.info(f"inference: uploaded masks={uploaded_masks} overlays={uploaded_overlays}")
+                    if overlay_path and os.path.exists(overlay_path):
+                        s3_overlay = f"{inference_output_metadata.rstrip('/')}/{train_run_id}/labelized_images/{base}.png"
+                        await asyncio.to_thread(s3.upload_file, overlay_path, s3_overlay)
+                        uploaded_overlays += 1
+                except Exception as e:
+                    logger.error(f"inference: failed to upload AMCNN masks: {e}")
+
+        # logger.info(f"inference: uploaded masks={uploaded_masks} overlays={uploaded_overlays}")
         logger.info(f"inference: complete run_id={train_run_id}")
-        
+            # else:
+            #     logger.error(f"inference: AMCNN not found: {model_name}")
     except Exception as e:
         logger.error(f"inference: failed run_id={train_run_id} error={str(e)}")
         pass

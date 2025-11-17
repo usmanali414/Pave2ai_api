@@ -22,10 +22,10 @@ import logging
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 # import tensorflow_addons as tfa  # Commented out for inference
-from tensorflow.keras.layers import GlobalAveragePooling2D,Reshape,Dense,Multiply,Conv2D,BatchNormalization
-from tensorflow.keras.layers import Activation,Add,MaxPooling2D,UpSampling2D,Concatenate,Input
-from tensorflow.keras.models import Model
-from tensorflow.keras import backend as K
+from tensorflow.keras.layers import GlobalAveragePooling2D,Reshape,Dense,Multiply,Conv2D,BatchNormalization # type: ignore
+from tensorflow.keras.layers import Activation,Add,MaxPooling2D,UpSampling2D,Concatenate,Input # type: ignore
+from tensorflow.keras.models import Model # type: ignore
+from tensorflow.keras import backend as K # type: ignore
 from app.deep_models.Algorithms.AMCNN.v1 import utils
 
 # #multigpu
@@ -608,12 +608,14 @@ class AMCNN():
             if accuracy is not None:
                 evaluation_dict['Accuracy'] = accuracy
 
-            self._write_eval_csv('./results.csv', evaluation_dict)
+            self._write_eval_csv('./evaluation_results.csv', evaluation_dict)
             
             # Upload evaluation CSV to S3
             if eval_logs_s3_url:
                 eval_csv_s3_path = f"{eval_logs_s3_url}/evaluation_results.csv"
-                self.s3_operations.upload_file('./evaluation_results.csv', eval_csv_s3_path)
+                upload = self.s3_operations.upload_file('./evaluation_results.csv', eval_csv_s3_path)
+                if not upload or not upload.get("success"):
+                    logger.error(f"Failed to upload evaluation CSV to {eval_csv_s3_path}")
             
             total_time = time.time() - start_time
             acc_str = f"{accuracy:.4f}" if accuracy is not None else "N/A"
